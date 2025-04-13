@@ -24,8 +24,8 @@ public class SkierClient {
   //http://SkierServerLB-817885713.us-west-2.elb.amazonaws.com:8080/skiers/5/seasons/2025/days/1/skier/65148
   // Phase 1
   private static final int PHASE1_TOTAL_REQUESTS = 32000;
-  private static final int PHASE1_THREADS = 32;
-  private static final int PHASE1_REQUESTS_PER_THREAD = 1000;
+  private static final int PHASE1_THREADS = 200; // changed thread count for Assignment 4
+  private static final int PHASE1_REQUESTS_PER_THREAD = 160;
 
   // Phase 2
   private static final int PHASE2_TOTAL_REQUESTS = 168000;

@@ -49,10 +49,18 @@ public class EventGenerator implements Runnable {
     }
   }
 
+
+/*  Changes dor Assignment 4
+  1. keep resort and season constant in all 3 runs
+  resortId = 5000, SeasonId = 2025
+  2. vary the day value for each run, namely {1, 2, 3}
+  change to 1,2,3 for each run
+  3. keep the number of skiers, lift rides as default values for first 3 assignments
+  4. Thread configuration of your choice*/
   private LiftRideEvent generateEvent() {
     return new LiftRideEvent(
         random.nextInt(100000) + 1,
-        random.nextInt(10) + 1,
+        5000,
         random.nextInt(40) + 1,
         2025,
         1,
