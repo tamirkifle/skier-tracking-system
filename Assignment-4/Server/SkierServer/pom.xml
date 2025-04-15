@@ -45,12 +45,12 @@
     <dependency>
       <groupId>com.amazonaws</groupId>
       <artifactId>aws-java-sdk-dynamodb</artifactId>
-      <version>1.12.400</version> <!-- Use latest version -->
+      <version>1.12.766</version>
     </dependency>
-  <!--  <dependency>
-      <groupId>io.micrometer</groupId>
-      <artifactId>micrometer-registry-prometheus</artifactId>
-    </dependency>-->
+    <!--  <dependency>
+        <groupId>io.micrometer</groupId>
+        <artifactId>micrometer-registry-prometheus</artifactId>
+      </dependency>-->
   </dependencies>
 
   <build>
