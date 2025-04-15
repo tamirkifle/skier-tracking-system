@@ -37,4 +37,15 @@ public class Constants {
   public static final String INVALID_LIFT_RIDE_DATA = "Invalid LiftRide data";
   public static final String RATE_LIMIT_EXCEEDED = "Rate limit exceeded";
   public static final String SERVER_ERROR = "Server Error: ";
+
+  //DynamoDB
+  public static final int MAX_DB_CONNECTION = 500;
+  public static final int DB_CONNECTION_TIMEOUT = 10_000;
+  public static final int DB_REQUEST_TIMEOUT = 20_000;
+  public static final String TARGET_TABLE_NAME = "LiftRides";
+
+  // Index names
+  public static final String SSD_INDEX = "SSD-Index";  // skierID#seasonID, dayID
+  public static final String RD_INDEX = "RD-Index";    // resortID#dayID, skierID
+  public static final String CS_INDEX = "CS-Index";    // resortID#seasonID, dayID#skierID
 }
