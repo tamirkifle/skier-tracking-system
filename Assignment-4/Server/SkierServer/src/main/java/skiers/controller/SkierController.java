@@ -1,5 +1,10 @@
 package skiers.controller;
 
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDB;
+import com.amazonaws.services.dynamodbv2.model.DescribeTableRequest;
+import com.amazonaws.services.dynamodbv2.model.ListTablesRequest;
+import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException;
+import java.util.HashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -20,6 +25,7 @@ public class SkierController {
 
   @Autowired private RabbitTemplate rabbitTemplate;
   @Autowired private RateLimiter rateLimiter;
+  @Autowired  private AmazonDynamoDB amazonDynamoDB;
 
   @PostMapping("/{resortID}/seasons/{seasonID}/days/{dayID}/skier/{skierID}")
   public ResponseEntity<?> addLiftRide(
@@ -88,6 +94,41 @@ public class SkierController {
 
     return liftID != null && liftID >= Constants.MIN_LIFT_ID && liftID <= Constants.MAX_LIFT_ID &&
         time != null && time >= Constants.MIN_TIME && time <= Constants.MAX_TIME;
+  }
+
+  @GetMapping("/dynamodb")
+  public ResponseEntity<?> checkDynamoDBConnection() {
+    try {
+      // First check basic connectivity
+      amazonDynamoDB.listTables(new ListTablesRequest().withLimit(1));
+
+      // Then check if our target table exists
+      boolean tableExists = false;
+      try {
+        amazonDynamoDB.describeTable(new DescribeTableRequest(Constants.TARGET_TABLE_NAME));
+        tableExists = true;
+      } catch (ResourceNotFoundException rnfe) {
+        // Table doesn't exist, but the connection is still valid
+      }
+
+      Map<String, Object> response = new HashMap<>();
+      response.put("status", "UP");
+
+      // Include table existence in the message
+      if (tableExists) {
+        response.put("message", "Successfully connected to DynamoDB and found table: " + Constants.TARGET_TABLE_NAME);
+      } else {
+        response.put("message", "Successfully connected to DynamoDB but table not found: " + Constants.TARGET_TABLE_NAME);
+      }
+
+      return ResponseEntity.ok(response);
+    } catch (Exception e) {
+      Map<String, Object> response = new HashMap<>();
+      response.put("status", "DOWN");
+      response.put("message", "Failed to connect to DynamoDB");
+      response.put("error", e.getMessage());
+      return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
+    }
   }
 
   @GetMapping("/health")

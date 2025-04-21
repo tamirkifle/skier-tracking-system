@@ -46,12 +46,11 @@ public class SkierDataProcessor {
         try {
           WriteTask task = writeQueue.take();
           // Write to LiftRides table
-          String shardedSkierId = task.skierId + "#" + (Math.abs(task.skierId.hashCode()) % 4);
           String compositeKey = task.resortId + "#" + task.seasonId + "#" + task.dayId + "#" + task.event.getTime();
           String vertical = String.valueOf(task.event.getLiftID() * 10);
 
           Item liftRideItem = new Item()
-              .withPrimaryKey("skierID", shardedSkierId)
+              .withPrimaryKey("skierID", task.skierId)
               .withString("resortID#seasonID#dayID#timestamp", compositeKey)
               .withString("dayID", task.dayId)
               .withString("liftID", String.valueOf(task.event.getLiftID()))
