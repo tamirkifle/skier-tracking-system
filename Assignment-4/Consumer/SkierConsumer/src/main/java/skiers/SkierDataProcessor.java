@@ -51,28 +51,29 @@ public class SkierDataProcessor {
           String gsiKey = task.resortId + "#" + task.seasonId + "#" + task.dayId;
           String vertical = String.valueOf(task.event.getLiftID() * 10);
 
-          // Additional composite keys for GSIs
-          String skierSeasonKey = task.skierId + "#" + task.seasonId;
-          String daySkierKey = task.dayId + "#" + task.skierId;
-          String resortDayKey = task.resortId + "#" + task.dayId;
-          String resortSeasonKey = task.resortId + "#" + task.seasonId;
+            // Additional composite keys for GSIs
+            String skierSeasonKey = task.skierId + "#" + task.seasonId;
+            String daySkierKey = task.dayId + "#" + task.skierId;
+            String resortDayKey = task.resortId + "#" + task.dayId;
+            String resortSeasonKey = task.resortId + "#" + task.seasonId;
+            String resortSeasonDayKey = task.resortId + "#" + task.seasonId + "#" + task.dayId;
 
-          Item liftRideItem = new Item()
-              .withPrimaryKey("skierID", task.skierId)
-              .withString("resortID#seasonID#dayID#timestamp", compositeKey)
-              .withString("dayID", task.dayId)
-              .withString("liftID", String.valueOf(task.event.getLiftID()))
-              .withString("resortID", task.resortId)
-              .withString("seasonID", task.seasonId)
-              .withString("timestamp", String.valueOf(task.event.getTime()))
-              .withString("vertical", vertical)
-              
-              // Add the additional composite keys for GSIs
-              .withString("resortSeasonDay", gsiKey)
-              .withString("skierID#seasonID", skierSeasonKey)
-              .withString("dayID#skierID", daySkierKey)
-              .withString("resortID#dayID", resortDayKey)
-              .withString("resortID#seasonID", resortSeasonKey);
+            Item liftRideItem = new Item()
+                .withPrimaryKey("skierID", task.skierId)
+                .withString("resortID#seasonID#dayID#timestamp", compositeKey)
+                .withString("dayID", task.dayId)
+                .withString("liftID", String.valueOf(task.event.getLiftID()))
+                .withString("resortID", task.resortId)
+                .withString("seasonID", task.seasonId)
+                .withString("timestamp", String.valueOf(task.event.getTime()))
+                .withString("vertical", vertical)
+
+                // Add the additional composite keys for GSIs
+                .withString("skierID#seasonID", skierSeasonKey)
+                .withString("dayID#skierID", daySkierKey)
+                .withString("resortID#dayID", resortDayKey)
+                .withString("resortID#seasonID", resortSeasonKey)
+                .withString("resortSeasonDay", resortSeasonDayKey);
 
           liftRidesTable.putItem(liftRideItem);
         } catch (InterruptedException e) {
