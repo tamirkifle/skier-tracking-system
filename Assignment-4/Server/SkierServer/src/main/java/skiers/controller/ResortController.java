@@ -65,7 +65,7 @@ public class ResortController {
       expressionAttributeValues.put(":resortSeasonDay", new AttributeValue().withS(gsiKey));
 
       QueryRequest queryRequest = new QueryRequest()
-          .withTableName("LiftRideS")
+          .withTableName(Constants.TARGET_TABLE_NAME)
           .withIndexName("resortSeasonDay-index")
           .withKeyConditionExpression("resortSeasonDay = :resortSeasonDay")
           .withExpressionAttributeValues(expressionAttributeValues);
