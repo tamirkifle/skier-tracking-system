@@ -53,12 +53,30 @@ public class ResortController {
     }
 
     try {
-      // Construct the query expression
-//      Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
-//      expressionAttributeValues.put(":resort", new AttributeValue().withS(resortID));
-//      expressionAttributeValues.put(":season", new AttributeValue().withS(seasonID));
-//      expressionAttributeValues.put(":day", new AttributeValue().withS(dayID));
 
+      String key = resortID + "#" + seasonID + "#" + dayID;
+
+      Map<String, AttributeValue> keyToGet = new HashMap<>();
+      keyToGet.put("resortSeasonDay", new AttributeValue().withS(key));
+
+      Map<String, AttributeValue> item = amazonDynamoDB.getItem("SkierCounts", keyToGet).getItem();
+
+      int count = 0;
+      if (item != null && item.containsKey("uniqueSkierCount")) {
+        count = Integer.parseInt(item.get("uniqueSkierCount").getN());
+      }
+
+      Map<String, Object> response = new HashMap<>();
+      response.put("resortID", resortID);
+      response.put("uniqueNumSkiers", count);
+
+      return ResponseEntity.ok(response);
+
+
+
+
+
+/**
       String gsiKey = resortID + "#" + seasonID + "#" + dayID;
 
       Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
@@ -70,8 +88,12 @@ public class ResortController {
           .withKeyConditionExpression("resortSeasonDay = :resortSeasonDay")
           .withExpressionAttributeValues(expressionAttributeValues);
 
+
       Set<String> uniqueSkiers = new HashSet<>();
 
+
+
+      /*
       QueryResult queryResult = amazonDynamoDB.query(queryRequest);
       for (Map<String, AttributeValue> item : queryResult.getItems()) {
         AttributeValue skierIdAttr = item.get("skierID");
@@ -79,12 +101,48 @@ public class ResortController {
           uniqueSkiers.add(skierIdAttr.getS());
         }
       }
+      if (queryResult.getLastEvaluatedKey() != null) {
+        Map<String, AttributeValue> exclusiveStartKey = new HashMap<>();
+        exclusiveStartKey.put("skierID", new AttributeValue().withS(queryResult.getLastEvaluatedKey()));
+        queryRequest.setExclusiveStartKey(exclusiveStartKey);
+      }
+      */
+
+
+
+/**
+      Map<String, AttributeValue> lastEvaluatedKey = null;
+      do {
+        if (lastEvaluatedKey != null) {
+          queryRequest.setExclusiveStartKey(lastEvaluatedKey); // Set the exclusive start key for pagination
+        }
+
+        // Execute the query
+        QueryResult queryResult = amazonDynamoDB.query(queryRequest);
+
+        // Process the query result and add skier IDs to the set
+        for (Map<String, AttributeValue> item : queryResult.getItems()) {
+          AttributeValue skierIdAttr = item.get("skierID");
+          if (skierIdAttr != null) {
+            uniqueSkiers.add(skierIdAttr.getS());
+          }
+        }
+
+        // Update the lastEvaluatedKey for the next query if more pages are available
+        lastEvaluatedKey = queryResult.getLastEvaluatedKey();
+
+      } while (lastEvaluatedKey != null); // Continue querying until no more pages
 
       Map<String, Object> response = new HashMap<>();
       response.put("resortID", resortID);
       response.put("numSkiers", uniqueSkiers.size());
 
       return ResponseEntity.ok(response);
+      **/
+
+
+
+
     } catch (Exception e) {
       logger.error("Error querying DynamoDB", e);
       return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
