@@ -47,6 +47,8 @@ public class SkierDataProcessor {
           WriteTask task = writeQueue.take();
           // Write to LiftRides table
           String compositeKey = task.resortId + "#" + task.seasonId + "#" + task.dayId + "#" + task.event.getTime();
+          // GSI key
+          String gsiKey = task.resortId + "#" + task.seasonId + "#" + task.dayId;
           String vertical = String.valueOf(task.event.getLiftID() * 10);
 
           Item liftRideItem = new Item()
@@ -57,7 +59,9 @@ public class SkierDataProcessor {
               .withString("resortID", task.resortId)
               .withString("seasonID", task.seasonId)
               .withString("timestamp", String.valueOf(task.event.getTime()))
-              .withString("vertical", vertical);
+              .withString("vertical", vertical)
+              // add GSI to query by resortID seasonID dayID
+              .withString("resortSeasonDay", gsiKey);
 
           liftRidesTable.putItem(liftRideItem);
         } catch (InterruptedException e) {

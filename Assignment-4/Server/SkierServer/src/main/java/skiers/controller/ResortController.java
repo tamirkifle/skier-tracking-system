@@ -4,9 +4,15 @@ import com.amazonaws.services.dynamodbv2.AmazonDynamoDB;
 import com.amazonaws.services.dynamodbv2.document.DynamoDB;
 import com.amazonaws.services.dynamodbv2.document.Item;
 import com.amazonaws.services.dynamodbv2.document.ItemCollection;
-import com.amazonaws.services.dynamodbv2.document.ScanFilter;
-import com.amazonaws.services.dynamodbv2.document.ScanOutcome;
 import com.amazonaws.services.dynamodbv2.document.Table;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDB;
+import com.amazonaws.services.dynamodbv2.model.DescribeTableRequest;
+import com.amazonaws.services.dynamodbv2.model.ListTablesRequest;
+import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException;
+import java.util.HashMap;
+import com.amazonaws.services.dynamodbv2.model.AttributeValue;
+import com.amazonaws.services.dynamodbv2.model.QueryRequest;
+import com.amazonaws.services.dynamodbv2.model.QueryResult;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -28,13 +34,10 @@ import skiers.Constants;
 @RestController
 @RequestMapping("/resorts")
 public class ResortController {
-  private static final Logger logger = LoggerFactory.getLogger(ResortController.class);
-  private final AmazonDynamoDB amazonDynamoDB;
 
+  private static final Logger logger = LoggerFactory.getLogger(ResortController.class);
   @Autowired
-  public ResortController(AmazonDynamoDB amazonDynamoDB) {
-    this.amazonDynamoDB = amazonDynamoDB;
-  }
+  private AmazonDynamoDB amazonDynamoDB;
 
   @GetMapping("/{resortID}/seasons/{seasonID}/day/{dayID}/skiers")
   public ResponseEntity<?> getUniqueSkiers(
@@ -44,39 +47,48 @@ public class ResortController {
 
     // check if URL is valid. Return 400 for invalid URL
     if (!isValidPathParameters(resortID, seasonID, dayID)) {
-      logger.warn("Invalid path parameters: resortID={}, seasonID={}, dayID={}", resortID, seasonID, dayID);
+      logger.warn("Invalid path parameters: resortID={}, seasonID={}, dayID={}", resortID, seasonID,
+          dayID);
       return ResponseEntity.badRequest().body(Map.of("message", "Invalid URL Parameters"));
     }
 
     try {
-      DynamoDB dynamoDB = new DynamoDB(AmazonDynamoDB);
-      Table table = dynamoDB.getTable("LiftRideS");
+      // Construct the query expression
+//      Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+//      expressionAttributeValues.put(":resort", new AttributeValue().withS(resortID));
+//      expressionAttributeValues.put(":season", new AttributeValue().withS(seasonID));
+//      expressionAttributeValues.put(":day", new AttributeValue().withS(dayID));
 
-      // scanning for resortID, seasonID and dayID
-      ScanFilter resortFilter = new ScanFilter("resortID").eq(resortID);
-      ScanFilter seasonFilter = new ScanFilter("seasonID").eq(seasonID);
-      ScanFilter dayFilter = new ScanFilter("dayID").eq(dayID);
+      String gsiKey = resortID + "#" + seasonID + "#" + dayID;
 
-      ItemCollection<ScanOutcome> items = table.scan(resortFilter, seasonFilter, dayFilter);
+      Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+      expressionAttributeValues.put(":resortSeasonDay", new AttributeValue().withS(gsiKey));
+
+      QueryRequest queryRequest = new QueryRequest()
+          .withTableName("LiftRideS")
+          .withIndexName("resortSeasonDay-index")
+          .withKeyConditionExpression("resortSeasonDay = :resortSeasonDay")
+          .withExpressionAttributeValues(expressionAttributeValues);
 
       Set<String> uniqueSkiers = new HashSet<>();
-      for (Item item : items) {
-        String skierID = item.getString("skierID");
-        if (skierID != null) {
-          uniqueSkiers.add(skierID);
+
+      QueryResult queryResult = amazonDynamoDB.query(queryRequest);
+      for (Map<String, AttributeValue> item : queryResult.getItems()) {
+        AttributeValue skierIdAttr = item.get("skierID");
+        if (skierIdAttr != null) {
+          uniqueSkiers.add(skierIdAttr.getS());
         }
       }
 
       Map<String, Object> response = new HashMap<>();
       response.put("resortID", resortID);
       response.put("numSkiers", uniqueSkiers.size());
-      // 200 response
+
       return ResponseEntity.ok(response);
     } catch (Exception e) {
-      logger.error("Error retrieving data from DynamoDB", e);
-      // return 404 if resortID not found
-      return ResponseEntity.status(HttpStatus.NOT_FOUND)
-          .body(Map.of("message", "Resort not found"));
+      logger.error("Error querying DynamoDB", e);
+      return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+          .body(Map.of("message", "Internal Server Error: " + e.getMessage()));
     }
   }
 
