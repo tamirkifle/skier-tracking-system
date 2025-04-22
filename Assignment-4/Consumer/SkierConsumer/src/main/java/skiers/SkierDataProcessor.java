@@ -47,6 +47,8 @@ public class SkierDataProcessor {
           WriteTask task = writeQueue.take();
           // Write to LiftRides table
           String compositeKey = task.resortId + "#" + task.seasonId + "#" + task.dayId + "#" + task.event.getTime();
+          // GSI key
+          String gsiKey = task.resortId + "#" + task.seasonId + "#" + task.dayId;
           String vertical = String.valueOf(task.event.getLiftID() * 10);
 
           // Additional composite keys for GSIs
@@ -64,8 +66,9 @@ public class SkierDataProcessor {
               .withString("seasonID", task.seasonId)
               .withString("timestamp", String.valueOf(task.event.getTime()))
               .withString("vertical", vertical)
-
+              
               // Add the additional composite keys for GSIs
+              .withString("resortSeasonDay", gsiKey)
               .withString("skierID#seasonID", skierSeasonKey)
               .withString("dayID#skierID", daySkierKey)
               .withString("resortID#dayID", resortDayKey)
