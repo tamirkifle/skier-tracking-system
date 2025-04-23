@@ -7,11 +7,7 @@ import com.amazonaws.services.dynamodbv2.model.GlobalSecondaryIndexDescription;
 import com.amazonaws.services.dynamodbv2.model.ListTablesRequest;
 import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException;
 import java.util.HashMap;
-import com.amazonaws.services.dynamodbv2.model.AttributeValue;
-import com.amazonaws.services.dynamodbv2.model.QueryRequest;
-import com.amazonaws.services.dynamodbv2.model.QueryResult;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -21,9 +17,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import skiers.model.LiftRide;
 import skiers.service.RateLimiter;
+import skiers.service.SkierService;
 import skiers.Constants;
-
-import java.util.Map;
 
 @RestController
 @RequestMapping("/skiers")
@@ -33,6 +28,7 @@ public class SkierController {
   @Autowired private RabbitTemplate rabbitTemplate;
   @Autowired private RateLimiter rateLimiter;
   @Autowired private AmazonDynamoDB amazonDynamoDB;
+  @Autowired private SkierService skierService;
 
   @PostMapping("/{resortID}/seasons/{seasonID}/days/{dayID}/skier/{skierID}")
   public ResponseEntity<?> addLiftRide(
@@ -76,6 +72,41 @@ public class SkierController {
     return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Constants.RATE_LIMIT_EXCEEDED);
   }
 
+  /**
+   * Get the total vertical for the skier for specified resort and optional season
+   */
+  @GetMapping("/{skierID}/vertical")
+  public ResponseEntity<?> getSkierResortTotals(
+      @PathVariable String skierID,
+      @RequestParam(required = true) String resort,
+      @RequestParam(required = false) String season) {
+
+    try {
+      // Validate inputs
+      if (!isValidSkierResort(skierID, resort)) {
+        logger.warn("Invalid input parameters: skierID={}, resort={}", skierID, resort);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(Map.of("message", "Invalid input parameters"));
+      }
+
+      // Use service layer with caching
+      Map<String, Object> response = skierService.getSkierResortTotals(skierID, resort, season);
+      
+      // If no data found, return 404
+      if (((java.util.List<?>) response.get("resorts")).isEmpty()) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(Map.of("message", "No vertical data found for the specified parameters"));
+      }
+
+      return ResponseEntity.ok(response);
+
+    } catch (Exception e) {
+      logger.error("Error retrieving skier resort totals", e);
+      return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+          .body(Map.of("message", "Error processing request: " + e.getMessage()));
+    }
+  }
+
   private boolean isValidPathParameters(String resortID, String seasonID, String dayID, String skierID) {
     try {
       int resort = Integer.parseInt(resortID);
@@ -85,7 +116,6 @@ public class SkierController {
 
       return resort >= Constants.MIN_RESORT_ID && resort <= Constants.MAX_RESORT_ID &&
           season == Constants.SEASON_ID &&
-//          day == Constants.DAY_ID &&
           skier >= Constants.MIN_SKIER_ID && skier <= Constants.MAX_SKIER_ID;
     } catch (NumberFormatException e) {
       return false;
@@ -104,176 +134,6 @@ public class SkierController {
   }
 
   /**
-   * Get the total vertical for the skier for specified resort and optional season
-   */
-  @GetMapping("/{skierID}/vertical")
-  public ResponseEntity<?> getSkierResortTotals(
-      @PathVariable String skierID,
-      @RequestParam(required = true) String resort,
-      @RequestParam(required = false) String season) {
-
-    try {
-      // Validate inputs
-      if (!isValidSkierResort(skierID, resort)) {
-        logger.warn("Invalid input parameters: skierID={}, resort={}", skierID, resort);
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-            .body(Map.of("message", "Invalid input parameters"));
-      }
-
-      // Map to store vertical by season
-      Map<String, Integer> seasonVerticalMap = new HashMap<>();
-
-      if (season != null && !season.isEmpty()) {
-        // When season is specified, use the CS-Index
-        // The partition key in your CLI is resortID#skierID
-        String partitionKey = resort + "#" + skierID;
-
-        // Build expression attribute values
-        Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
-        expressionAttributeValues.put(":partitionKey", new AttributeValue().withS(partitionKey));
-        expressionAttributeValues.put(":seasonPrefix", new AttributeValue().withS(season + "#"));
-
-        // Add expression attribute names to handle the "#" character
-        Map<String, String> expressionAttributeNames = new HashMap<>();
-        expressionAttributeNames.put("#partitionKeyAttr", "resortID#skierID");
-        expressionAttributeNames.put("#sortKeyAttr", "seasonID#dayID");
-
-        // Query against CS-Index with begins_with on the sort key
-        QueryRequest queryRequest = new QueryRequest()
-            .withTableName(Constants.TARGET_TABLE_NAME)
-            .withIndexName("CS-Index")
-            .withKeyConditionExpression("#partitionKeyAttr = :partitionKey AND begins_with(#sortKeyAttr, :seasonPrefix)")
-            .withExpressionAttributeValues(expressionAttributeValues)
-            .withExpressionAttributeNames(expressionAttributeNames);
-
-        // Execute and process
-        int totalVertical = executeVerticalQuery(queryRequest);
-
-        // Add to seasonVerticalMap if results found
-        if (totalVertical > 0) {
-          seasonVerticalMap.put(season, totalVertical);
-        }
-
-      } else {
-        // When no season is specified, still use CS-Index but don't filter by season
-        String partitionKey = resort + "#" + skierID;
-
-        Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
-        expressionAttributeValues.put(":partitionKey", new AttributeValue().withS(partitionKey));
-
-        // Add expression attribute names to handle the "#" character
-        Map<String, String> expressionAttributeNames = new HashMap<>();
-        expressionAttributeNames.put("#partitionKeyAttr", "resortID#skierID");
-
-        // Query against CS-Index with proper attribute naming
-        QueryRequest queryRequest = new QueryRequest()
-            .withTableName(Constants.TARGET_TABLE_NAME)
-            .withIndexName("CS-Index")
-            .withKeyConditionExpression("#partitionKeyAttr = :partitionKey")
-            .withExpressionAttributeValues(expressionAttributeValues)
-            .withExpressionAttributeNames(expressionAttributeNames);
-
-        // Execute query
-        QueryResult queryResult = amazonDynamoDB.query(queryRequest);
-
-        // Group and sum by season
-        processVerticalBySeasons(queryResult.getItems(), seasonVerticalMap);
-
-        // Handle pagination
-        while (queryResult.getLastEvaluatedKey() != null && !queryResult.getLastEvaluatedKey().isEmpty()) {
-          queryRequest.withExclusiveStartKey(queryResult.getLastEvaluatedKey());
-          queryResult = amazonDynamoDB.query(queryRequest);
-          processVerticalBySeasons(queryResult.getItems(), seasonVerticalMap);
-        }
-      }
-
-      // If no data found, return 404
-      if (seasonVerticalMap.isEmpty()) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-            .body(Map.of("message", "No vertical data found for the specified parameters"));
-      }
-
-      // Format response
-      Map<String, Object> response = new HashMap<>();
-      List<Map<String, Object>> resorts = new ArrayList<>();
-
-      // Add all seasons to the response
-      for (Map.Entry<String, Integer> entry : seasonVerticalMap.entrySet()) {
-        Map<String, Object> seasonData = new HashMap<>();
-        seasonData.put("seasonID", entry.getKey());
-        seasonData.put("totalVert", entry.getValue());
-        resorts.add(seasonData);
-      }
-
-      response.put("resorts", resorts);
-      return ResponseEntity.ok(response);
-
-    } catch (Exception e) {
-      logger.error("Error retrieving skier resort totals", e);
-      return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-          .body(Map.of("message", "Error processing request: " + e.getMessage()));
-    }
-  }
-
-  // Helper method to execute query and sum vertical
-  private int executeVerticalQuery(QueryRequest queryRequest) {
-    int totalVertical = 0;
-    try {
-      QueryResult queryResult = amazonDynamoDB.query(queryRequest);
-
-      // Process initial results
-      for (Map<String, AttributeValue> item : queryResult.getItems()) {
-        if (item.containsKey("vertical")) {
-          try {
-            totalVertical += Integer.parseInt(item.get("vertical").getS());
-          } catch (NumberFormatException e) {
-            logger.warn("Invalid vertical value: {}", item.get("vertical").getS());
-          }
-        }
-      }
-
-      // Handle pagination
-      while (queryResult.getLastEvaluatedKey() != null && !queryResult.getLastEvaluatedKey().isEmpty()) {
-        queryRequest.withExclusiveStartKey(queryResult.getLastEvaluatedKey());
-        queryResult = amazonDynamoDB.query(queryRequest);
-
-        for (Map<String, AttributeValue> item : queryResult.getItems()) {
-          if (item.containsKey("vertical")) {
-            try {
-              totalVertical += Integer.parseInt(item.get("vertical").getS());
-            } catch (NumberFormatException e) {
-              logger.warn("Invalid vertical value: {}", item.get("vertical").getS());
-            }
-          }
-        }
-      }
-    } catch (Exception e) {
-      logger.error("Error executing vertical query: {}", e.getMessage(), e);
-    }
-    return totalVertical;
-  }
-
-  // Helper method to process verticals by season
-  private void processVerticalBySeasons(List<Map<String, AttributeValue>> items, Map<String, Integer> seasonVerticalMap) {
-    for (Map<String, AttributeValue> item : items) {
-      // Extract season from the sort key (seasonID#dayID)
-      if (item.containsKey("seasonID#dayID") && item.containsKey("vertical")) {
-        String sortKey = item.get("seasonID#dayID").getS();
-        String seasonID = sortKey.split("#")[0]; // Extract season from sort key
-
-        try {
-          int vertical = Integer.parseInt(item.get("vertical").getS());
-          // Update season total
-          seasonVerticalMap.put(seasonID,
-              seasonVerticalMap.getOrDefault(seasonID, 0) + vertical);
-        } catch (NumberFormatException e) {
-          logger.warn("Invalid vertical value: {}", item.get("vertical").getS());
-        }
-      }
-    }
-  }
-
-  /**
    * Validate inputs for resort totals endpoint
    */
   private boolean isValidSkierResort(String skierID, String resort) {
@@ -281,7 +141,6 @@ public class SkierController {
     return skierID != null && !skierID.trim().isEmpty() &&
         resort != null && !resort.trim().isEmpty();
   }
-
 
   @GetMapping("/dynamodb")
   public ResponseEntity<?> checkDynamoDBConnection() {
