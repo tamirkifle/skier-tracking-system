@@ -1,0 +1,46 @@
+### General ###
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+### Build ###
+target/
+build/
+dist/
+nbdist/
+nbbuild/
+!**/src/main/**/target/
+!**/src/test/**/target/
+!**/src/main/**/build/
+!**/src/test/**/build/
+!.mvn/wrapper/maven-wrapper.jar
+
+### IDE - IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### IDE - Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IDE - NetBeans ###
+/nbproject/private/
+/.nb-gradle/
+
+### IDE - VS Code ###
+.vscode/
+
+### Java ###
+*.class
+*.jar
+*.war
+
+### Node.js ###
+node_modules/
