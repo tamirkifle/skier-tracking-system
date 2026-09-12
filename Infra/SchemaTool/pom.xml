@@ -62,14 +62,7 @@
             </goals>
             <configuration>
               <createDependencyReducedPom>false</createDependencyReducedPom>
-              <!--
-                combine.self="override" is required, not stylistic. spring-boot-starter-parent
-                already configures a shade execution with the id "default" whose transformer list
-                contains AppendingTransformer entries carrying <resource> elements. Maven merges
-                same-id executions by element position, so without the override those <resource>
-                elements are applied to the transformers declared here and the build fails with
-                "Cannot find 'resource' in class ManifestResourceTransformer".
-              -->
+              <!-- Override avoids inheriting Spring Boot parent's default shade transformers. -->
               <transformers combine.self="override">
                 <transformer
                   implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
