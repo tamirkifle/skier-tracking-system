@@ -28,6 +28,11 @@
     backed by RabbitMQ, DynamoDB and Redis.
   </description>
 
+  <modules>
+    <!-- Schema first: the services' integration tests depend on it. -->
+    <module>Infra/SchemaTool</module>
+  </modules>
+
   <properties>
     <java.version>17</java.version>
     <maven.compiler.release>17</maven.compiler.release>
