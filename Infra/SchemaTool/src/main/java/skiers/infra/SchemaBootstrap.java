@@ -1,12 +1,16 @@
 package skiers.infra;
 
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClientBuilder;
 import software.amazon.awssdk.services.dynamodb.model.CreateTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.DescribeTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.DescribeTableResponse;
@@ -40,6 +44,36 @@ public final class SchemaBootstrap {
 
   public SchemaBootstrap(DynamoDbClient client) {
     this.client = client;
+  }
+
+  public static void main(String[] args) {
+    String endpoint = args.length > 0 ? args[0] : System.getenv("AWS_DYNAMODB_ENDPOINT");
+    String region = System.getenv("AWS_REGION") == null ? "us-west-2" : System.getenv("AWS_REGION");
+
+    DynamoDbClientBuilder builder =
+        DynamoDbClient.builder()
+            .credentialsProvider(DefaultCredentialsProvider.create())
+            .region(Region.of(region));
+
+    if (endpoint != null && !endpoint.isBlank()) {
+      logger.info("Applying schema to local endpoint {}", endpoint);
+      builder.endpointOverride(URI.create(endpoint));
+    } else {
+      logger.info("Applying schema to AWS region {}", region);
+    }
+
+    try (DynamoDbClient client = builder.build()) {
+      Result result = new SchemaBootstrap(client).apply();
+      logger.info(
+          "Schema applied: {} created, {} already present", result.created(), result.existing());
+      if (!result.drift().isEmpty()) {
+        result.drift().forEach(message -> logger.error("Schema drift: {}", message));
+        System.exit(1);
+      }
+    } catch (RuntimeException e) {
+      logger.error("Schema bootstrap failed: {}", e.getMessage(), e);
+      System.exit(2);
+    }
   }
 
   /** Creates every missing table, waits for {@code ACTIVE}, then applies TTL. */
