@@ -2,9 +2,12 @@ package skiers.infra;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.model.CreateTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.DescribeTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.DescribeTableResponse;
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
@@ -31,6 +34,49 @@ public final class SchemaBootstrap {
 
   public SchemaBootstrap(DynamoDbClient client) {
     this.client = client;
+  }
+
+  /** Reports differences without correcting them. */
+  private List<String> compare(CreateTableRequest expected, DescribeTableResponse actual) {
+    List<String> differences = new ArrayList<>();
+    String tableName = expected.tableName();
+
+    if (!expected.keySchema().equals(actual.table().keySchema())) {
+      differences.add(
+          tableName
+              + ": key schema is "
+              + describeKeys(actual.table().keySchema())
+              + ", expected "
+              + describeKeys(expected.keySchema()));
+    }
+
+    List<String> expectedIndexes =
+        expected.globalSecondaryIndexes().stream()
+            .map(index -> index.indexName())
+            .sorted()
+            .toList();
+    List<String> actualIndexes =
+        actual.table().hasGlobalSecondaryIndexes()
+            ? actual.table().globalSecondaryIndexes().stream()
+                .map(index -> index.indexName())
+                .sorted()
+                .toList()
+            : List.of();
+
+    if (!expectedIndexes.equals(actualIndexes)) {
+      differences.add(
+          tableName + ": indexes are " + actualIndexes + ", expected " + expectedIndexes);
+    }
+
+    return differences;
+  }
+
+  private static String describeKeys(
+      List<software.amazon.awssdk.services.dynamodb.model.KeySchemaElement> keys) {
+    return keys.stream()
+        .map(key -> key.attributeName() + '(' + key.keyTypeAsString() + ')')
+        .toList()
+        .toString();
   }
 
   private DescribeTableResponse describe(String tableName) {
