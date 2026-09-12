@@ -9,6 +9,7 @@ import software.amazon.awssdk.services.dynamodb.model.KeyType;
 import software.amazon.awssdk.services.dynamodb.model.Projection;
 import software.amazon.awssdk.services.dynamodb.model.ProjectionType;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
+import software.amazon.awssdk.services.dynamodb.model.TimeToLiveSpecification;
 
 /**
  * The DynamoDB schema as data, so the integration suite, Compose and a deployment apply the same
@@ -42,6 +43,16 @@ public final class DynamoDbSchema {
 
   public static List<CreateTableRequest> tables() {
     return List.of(liftRides(), skierCounts(), skierTracking());
+  }
+
+  public static TimeToLiveSpecification timeToLiveFor(String tableName) {
+    if (!SKIER_TRACKING.equals(tableName)) {
+      return null;
+    }
+    return TimeToLiveSpecification.builder()
+        .attributeName(SKIER_TRACKING_TTL_ATTRIBUTE)
+        .enabled(true)
+        .build();
   }
 
   /** Partitioned by skier: a resort partition key would concentrate every write on ten keys. */

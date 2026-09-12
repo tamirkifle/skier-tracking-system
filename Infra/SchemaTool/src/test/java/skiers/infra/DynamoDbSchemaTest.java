@@ -90,6 +90,21 @@ class DynamoDbSchemaTest {
   }
 
   @Test
+  @DisplayName("only SkierTracking has a TTL, and it names the attribute the write path stamps")
+  void ttlAppliesToTheSentinelTableAlone() {
+    assertThat(DynamoDbSchema.timeToLiveFor(DynamoDbSchema.SKIER_TRACKING))
+        .isNotNull()
+        .satisfies(ttl -> assertThat(ttl.enabled()).isTrue())
+        .satisfies(
+            ttl ->
+                assertThat(ttl.attributeName())
+                    .isEqualTo(DynamoDbSchema.SKIER_TRACKING_TTL_ATTRIBUTE));
+
+    assertThat(DynamoDbSchema.timeToLiveFor(DynamoDbSchema.LIFT_RIDES)).isNull();
+    assertThat(DynamoDbSchema.timeToLiveFor(DynamoDbSchema.SKIER_COUNTS)).isNull();
+  }
+
+  @Test
   @DisplayName("SkierTracking is keyed by the sentinel identity alone")
   void skierTrackingIsKeyedBySentinel() {
     Map<KeyType, String> key = keys(tables().get(DynamoDbSchema.SKIER_TRACKING).keySchema());
