@@ -26,8 +26,9 @@ import software.amazon.awssdk.services.dynamodb.model.UpdateTimeToLiveRequest;
 /**
  * Applies {@link DynamoDbSchema} to a DynamoDB endpoint. Creation is idempotent, so it can run at
  * container start, on every deploy and repeatedly in a test without a guard. Drift on an existing
- * table is reported and exits non-zero rather than reconciled: adding a GSI to a populated table is
- * a long backfill and a cost decision.
+ * table is reported and exits non-zero rather than reconciled: adding or modifying indexes on a
+ * populated table triggers asynchronous backfilling and carries operational cost, so schema updates
+ * require manual operator action.
  *
  * <pre>
  *   java -jar skier-schema-tool.jar                          # real AWS, region from env
@@ -112,7 +113,10 @@ public final class SchemaBootstrap {
     return new Result(created, existing, drift);
   }
 
-  /** {@code UpdateTimeToLive} fails rather than no-opping when TTL is already set, so check. */
+  /**
+   * DynamoDB throws an error if {@code UpdateTimeToLive} is called when TTL is already enabled, so
+   * verify state first.
+   */
   private void ensureTimeToLive(String tableName, TimeToLiveSpecification desired) {
     DescribeTimeToLiveResponse current =
         client.describeTimeToLive(DescribeTimeToLiveRequest.builder().tableName(tableName).build());
