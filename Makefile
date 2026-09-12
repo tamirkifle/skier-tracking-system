@@ -22,3 +22,14 @@ build: ## Compile and package every module
 .PHONY: test
 test: ## Run the unit suite (no Docker required)
 	$(MVN) -B test
+
+.PHONY: format
+format: ## Apply google-java-format to every module
+	$(MVN) -B spotless:apply
+
+.PHONY: format-check
+format-check: ## Fail if any file is unformatted
+	$(MVN) -B spotless:check
+
+.PHONY: lint
+lint: format-check ## Alias for format-check
