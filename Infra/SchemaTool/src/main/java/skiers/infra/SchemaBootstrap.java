@@ -10,8 +10,14 @@ import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.CreateTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.DescribeTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.DescribeTableResponse;
+import software.amazon.awssdk.services.dynamodb.model.DescribeTimeToLiveRequest;
+import software.amazon.awssdk.services.dynamodb.model.DescribeTimeToLiveResponse;
+import software.amazon.awssdk.services.dynamodb.model.ResourceInUseException;
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.dynamodb.model.TableStatus;
+import software.amazon.awssdk.services.dynamodb.model.TimeToLiveSpecification;
+import software.amazon.awssdk.services.dynamodb.model.TimeToLiveStatus;
+import software.amazon.awssdk.services.dynamodb.model.UpdateTimeToLiveRequest;
 
 /**
  * Applies {@link DynamoDbSchema} to a DynamoDB endpoint. Creation is idempotent, so it can run at
@@ -34,6 +40,65 @@ public final class SchemaBootstrap {
 
   public SchemaBootstrap(DynamoDbClient client) {
     this.client = client;
+  }
+
+  /** Creates every missing table, waits for {@code ACTIVE}, then applies TTL. */
+  public Result apply() {
+    List<String> created = new ArrayList<>();
+    List<String> existing = new ArrayList<>();
+    List<String> drift = new ArrayList<>();
+
+    for (CreateTableRequest request : DynamoDbSchema.tables()) {
+      String tableName = request.tableName();
+      DescribeTableResponse describe = describe(tableName);
+
+      if (describe == null) {
+        try {
+          client.createTable(request);
+          created.add(tableName);
+          logger.info("Created table {}", tableName);
+        } catch (ResourceInUseException raced) {
+          // ResourceInUse means another bootstrapper won the race, which counts as success.
+          existing.add(tableName);
+          logger.info("Table {} was created concurrently", tableName);
+        }
+      } else {
+        existing.add(tableName);
+        drift.addAll(compare(request, describe));
+      }
+
+      awaitActive(tableName);
+
+      TimeToLiveSpecification ttl = DynamoDbSchema.timeToLiveFor(tableName);
+      if (ttl != null) {
+        ensureTimeToLive(tableName, ttl);
+      }
+    }
+
+    return new Result(created, existing, drift);
+  }
+
+  /** {@code UpdateTimeToLive} fails rather than no-opping when TTL is already set, so check. */
+  private void ensureTimeToLive(String tableName, TimeToLiveSpecification desired) {
+    DescribeTimeToLiveResponse current =
+        client.describeTimeToLive(DescribeTimeToLiveRequest.builder().tableName(tableName).build());
+
+    boolean alreadyEnabled =
+        current.timeToLiveDescription() != null
+            && current.timeToLiveDescription().timeToLiveStatus() == TimeToLiveStatus.ENABLED
+            && desired.attributeName().equals(current.timeToLiveDescription().attributeName());
+
+    if (alreadyEnabled) {
+      logger.info("TTL already enabled on {} ({})", tableName, desired.attributeName());
+      return;
+    }
+
+    client.updateTimeToLive(
+        UpdateTimeToLiveRequest.builder()
+            .tableName(tableName)
+            .timeToLiveSpecification(desired)
+            .build());
+    logger.info("Enabled TTL on {} ({})", tableName, desired.attributeName());
   }
 
   /** Reports differences without correcting them. */
@@ -118,4 +183,6 @@ public final class SchemaBootstrap {
                 index.indexStatus()
                     == software.amazon.awssdk.services.dynamodb.model.IndexStatus.ACTIVE);
   }
+
+  public record Result(List<String> created, List<String> existing, List<String> drift) {}
 }
