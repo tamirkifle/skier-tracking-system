@@ -20,6 +20,13 @@
     tests and run as a CLI by docker compose and by deployment.
   </description>
 
+  <dependencies>
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>dynamodb</artifactId>
+    </dependency>
+  </dependencies>
+
   <build>
     <finalName>skier-schema-tool</finalName>
   </build>
