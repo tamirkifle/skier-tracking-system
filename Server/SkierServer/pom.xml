@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.skiers</groupId>
+    <artifactId>skier-tracking-system</artifactId>
+    <version>2.0.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>skier-server</artifactId>
+  <packaging>jar</packaging>
+
+  <name>Skier Server</name>
+  <description>
+    Write-path ingest API and read-path query API. Accepts lift-ride events, applies adaptive
+    admission control, publishes to RabbitMQ, and serves cached aggregate reads from DynamoDB.
+  </description>
+
+  <dependencies>
+    <!-- Web / messaging / ops -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>skier-server</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <mainClass>skiers.SkierServerApplication</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
