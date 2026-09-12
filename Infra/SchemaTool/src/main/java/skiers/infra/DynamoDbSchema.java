@@ -1,6 +1,12 @@
 package skiers.infra;
 
 import software.amazon.awssdk.services.dynamodb.model.AttributeDefinition;
+import software.amazon.awssdk.services.dynamodb.model.CreateTableRequest;
+import software.amazon.awssdk.services.dynamodb.model.GlobalSecondaryIndex;
+import software.amazon.awssdk.services.dynamodb.model.KeySchemaElement;
+import software.amazon.awssdk.services.dynamodb.model.KeyType;
+import software.amazon.awssdk.services.dynamodb.model.Projection;
+import software.amazon.awssdk.services.dynamodb.model.ProjectionType;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
 /**
@@ -32,6 +38,67 @@ public final class DynamoDbSchema {
 
   /** DynamoDB applies TTL to an item attribute by name, separately from table creation. */
   public static final String SKIER_TRACKING_TTL_ATTRIBUTE = "expiresAt";
+
+  /** Partitioned by skier: a resort partition key would concentrate every write on ten keys. */
+  private static CreateTableRequest liftRides() {
+    return CreateTableRequest.builder()
+        .tableName(LIFT_RIDES)
+        .billingMode(software.amazon.awssdk.services.dynamodb.model.BillingMode.PAY_PER_REQUEST)
+        .keySchema(
+            KeySchemaElement.builder().attributeName(SKIER_ID).keyType(KeyType.HASH).build(),
+            KeySchemaElement.builder().attributeName(SORT_KEY).keyType(KeyType.RANGE).build())
+        .attributeDefinitions(
+            string(SKIER_ID),
+            string(SORT_KEY),
+            string(SKIER_SEASON),
+            string(DAY_ID),
+            string(RESORT_DAY),
+            string(RESORT_SKIER),
+            string(SEASON_DAY))
+        .globalSecondaryIndexes(ssdIndex(), rdIndex(), csIndex())
+        .build();
+  }
+
+  /** Which days a skier skied in a season. Index write cost scales with the projection. */
+  private static GlobalSecondaryIndex ssdIndex() {
+    return GlobalSecondaryIndex.builder()
+        .indexName(SSD_INDEX)
+        .keySchema(
+            KeySchemaElement.builder().attributeName(SKIER_SEASON).keyType(KeyType.HASH).build(),
+            KeySchemaElement.builder().attributeName(DAY_ID).keyType(KeyType.RANGE).build())
+        .projection(
+            Projection.builder()
+                .projectionType(ProjectionType.INCLUDE)
+                .nonKeyAttributes("vertical", "liftID", "resortID")
+                .build())
+        .build();
+  }
+
+  /** Who was at a resort on a day. {@code KEYS_ONLY}: the keys are the whole answer. */
+  private static GlobalSecondaryIndex rdIndex() {
+    return GlobalSecondaryIndex.builder()
+        .indexName(RD_INDEX)
+        .keySchema(
+            KeySchemaElement.builder().attributeName(RESORT_DAY).keyType(KeyType.HASH).build(),
+            KeySchemaElement.builder().attributeName(SKIER_ID).keyType(KeyType.RANGE).build())
+        .projection(Projection.builder().projectionType(ProjectionType.KEYS_ONLY).build())
+        .build();
+  }
+
+  /** Partitioned by {@code resort#skier}; {@code resort#season} would be one hot partition. */
+  private static GlobalSecondaryIndex csIndex() {
+    return GlobalSecondaryIndex.builder()
+        .indexName(CS_INDEX)
+        .keySchema(
+            KeySchemaElement.builder().attributeName(RESORT_SKIER).keyType(KeyType.HASH).build(),
+            KeySchemaElement.builder().attributeName(SEASON_DAY).keyType(KeyType.RANGE).build())
+        .projection(
+            Projection.builder()
+                .projectionType(ProjectionType.INCLUDE)
+                .nonKeyAttributes("vertical", "liftID")
+                .build())
+        .build();
+  }
 
   private static AttributeDefinition string(String name) {
     return AttributeDefinition.builder()
