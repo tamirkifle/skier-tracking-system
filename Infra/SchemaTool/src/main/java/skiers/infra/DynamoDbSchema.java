@@ -1,5 +1,6 @@
 package skiers.infra;
 
+import java.util.List;
 import software.amazon.awssdk.services.dynamodb.model.AttributeDefinition;
 import software.amazon.awssdk.services.dynamodb.model.CreateTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.GlobalSecondaryIndex;
@@ -38,6 +39,10 @@ public final class DynamoDbSchema {
 
   /** DynamoDB applies TTL to an item attribute by name, separately from table creation. */
   public static final String SKIER_TRACKING_TTL_ATTRIBUTE = "expiresAt";
+
+  public static List<CreateTableRequest> tables() {
+    return List.of(liftRides(), skierCounts(), skierTracking());
+  }
 
   /** Partitioned by skier: a resort partition key would concentrate every write on ten keys. */
   private static CreateTableRequest liftRides() {
@@ -97,6 +102,30 @@ public final class DynamoDbSchema {
                 .projectionType(ProjectionType.INCLUDE)
                 .nonKeyAttributes("vertical", "liftID")
                 .build())
+        .build();
+  }
+
+  private static CreateTableRequest skierCounts() {
+    return CreateTableRequest.builder()
+        .tableName(SKIER_COUNTS)
+        .billingMode(software.amazon.awssdk.services.dynamodb.model.BillingMode.PAY_PER_REQUEST)
+        .keySchema(
+            KeySchemaElement.builder()
+                .attributeName(RESORT_SEASON_DAY)
+                .keyType(KeyType.HASH)
+                .build())
+        .attributeDefinitions(string(RESORT_SEASON_DAY))
+        .build();
+  }
+
+  /** One sentinel per {@code resort#season#day#skier}, put under {@code attribute_not_exists}. */
+  private static CreateTableRequest skierTracking() {
+    return CreateTableRequest.builder()
+        .tableName(SKIER_TRACKING)
+        .billingMode(software.amazon.awssdk.services.dynamodb.model.BillingMode.PAY_PER_REQUEST)
+        .keySchema(
+            KeySchemaElement.builder().attributeName(SKIER_KEY).keyType(KeyType.HASH).build())
+        .attributeDefinitions(string(SKIER_KEY))
         .build();
   }
 
