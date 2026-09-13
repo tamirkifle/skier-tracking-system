@@ -38,10 +38,7 @@ public class ResortController {
 
     if (!isValidPathParameters(resortID, seasonID, dayID)) {
       logger.debug(
-          "Rejecting out-of-domain path: resort={} season={} day={} skier={}",
-          resortID,
-          seasonID,
-          dayID);
+          "Rejecting out-of-domain path: resort={} season={} day={}", resortID, seasonID, dayID);
       return ResponseEntity.badRequest()
           .body(new SkierController.ApiError("Invalid URL Parameters", "resortID/seasonID/dayID"));
     }
