@@ -27,4 +27,24 @@ public final class Constants {
   public static final int MAX_LIFT_ID = 40;
   public static final int MIN_TIME = 1;
   public static final int MAX_TIME = 360;
+
+  public static final int MAX_DB_CONNECTION = 500;
+  public static final int DB_CONNECTION_TIMEOUT = 10_000;
+  public static final int DB_REQUEST_TIMEOUT = 20_000;
+
+  public static final String TARGET_TABLE_NAME = "LiftRides";
+  public static final String SKIER_COUNTS_TABLE = "SkierCounts";
+  public static final String SKIER_TRACKING_TABLE = "SkierTracking";
+
+  public static final String SSD_INDEX = "SSD-Index";
+  public static final String RD_INDEX = "RD-Index";
+  public static final String CS_INDEX = "CS-Index";
+
+  public static final String ATTR_SKIER_ID = "skierID";
+  public static final String ATTR_SORT_KEY = "resortID#seasonID#dayID#timestamp";
+  public static final String ATTR_RESORT_SKIER = "resortID#skierID";
+  public static final String ATTR_SEASON_DAY = "seasonID#dayID";
+  public static final String ATTR_RESORT_SEASON_DAY = "resortSeasonDay";
+  public static final String ATTR_VERTICAL = "vertical";
+  public static final String ATTR_UNIQUE_SKIER_COUNT = "uniqueSkierCount";
 }
