@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.skiers</groupId>
+    <artifactId>skier-tracking-system</artifactId>
+    <version>2.0.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>skier-consumer</artifactId>
+  <packaging>jar</packaging>
+
+  <name>Skier Consumer</name>
+  <description>
+    Drains the lift-ride queue and persists events to DynamoDB, maintaining per-resort-day
+    unique-skier cardinality. Acknowledges only after the write is durable.
+  </description>
+
+  <dependencies>
+    <!-- Web (actuator endpoints only) / messaging / ops -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>skier-consumer</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <mainClass>skiers.SkierConsumerApplication</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

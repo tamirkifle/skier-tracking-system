@@ -32,6 +32,7 @@
     <!-- Schema first: the services' integration tests depend on it. -->
     <module>Infra/SchemaTool</module>
     <module>Server/SkierServer</module>
+    <module>Consumer/SkierConsumer</module>
   </modules>
 
   <properties>
