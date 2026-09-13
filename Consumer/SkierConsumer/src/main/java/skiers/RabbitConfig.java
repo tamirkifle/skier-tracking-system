@@ -32,6 +32,21 @@ public class RabbitConfig {
     return new TopicExchange(Constants.LIFT_RIDE_EXCHANGE, true, false);
   }
 
+  /** Unconsumed: {@code x-message-ttl} is the delay, and expiry returns it to the exchange. */
+  @Bean
+  public Queue retryQueue(ConsumerProperties properties) {
+    return QueueBuilder.durable(Constants.RETRY_QUEUE)
+        .withArgument("x-message-ttl", properties.getWriter().getRetryDelayMs())
+        .withArgument("x-dead-letter-exchange", Constants.LIFT_RIDE_EXCHANGE)
+        .withArgument("x-dead-letter-routing-key", Constants.LIFT_RIDE_ROUTING_KEY)
+        .build();
+  }
+
+  @Bean
+  public Binding retryBinding(Queue retryQueue, TopicExchange mainExchange) {
+    return BindingBuilder.bind(retryQueue).to(mainExchange).with(Constants.RETRY_ROUTING_KEY);
+  }
+
   @Bean
   public Binding mainBinding(Queue mainQueue, TopicExchange mainExchange) {
     return BindingBuilder.bind(mainQueue).to(mainExchange).with(Constants.LIFT_RIDE_ROUTING_KEY);
