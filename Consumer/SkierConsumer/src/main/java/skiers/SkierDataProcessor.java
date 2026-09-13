@@ -79,6 +79,27 @@ public class SkierDataProcessor {
     }
   }
 
+  private void retryOrDeadLetter(LiftRideEvent event) {
+    int attempt = event.recordAttempt();
+    if (attempt > config.getMaxRetries()) {
+      metrics.recordDropped();
+      logger.error(
+          "Dead-lettering event after {} attempts: skier={} sortKey={}",
+          attempt,
+          event.skierId(),
+          event.sortKey());
+      event.ack().reject(false);
+      return;
+    }
+
+    metrics.recordRetry();
+    if (!event.ack().retryLater(attempt)) {
+      // The delay route refused it, so the delivery went back unchanged and the attempt just spent
+      // is recorded nowhere. Counted apart from retries: this is where the budget stops binding.
+      metrics.recordRetryHandoffFailed();
+    }
+  }
+
   public int stagedCount() {
     return stagingQueue.size();
   }
