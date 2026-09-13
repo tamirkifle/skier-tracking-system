@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -258,6 +259,42 @@ class SkierControllerTest {
         .andExpect(status().isBadRequest());
 
     verify(rateLimiter, never()).tryAcquire(anyLong());
+  }
+
+  @Test
+  @DisplayName("an internal failure returns a correlation id, not the exception message")
+  void doesNotLeakInternalDetail() throws Exception {
+    when(skierService.getSkierData("5", "2025", "1", "42"))
+        .thenThrow(
+            new RuntimeException(
+                "ResourceNotFoundException: table LiftRides in account 182904257700"));
+
+    String responseBody =
+        mockMvc
+            .perform(get("/skiers/5/seasons/2025/days/1/skiers/42"))
+            .andExpect(status().isInternalServerError())
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.startsWith("errorId=")))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    assertThat(responseBody).doesNotContain("182904257700").doesNotContain("LiftRides");
+  }
+
+  @Test
+  @DisplayName("an unknown path is a 404, not a 500")
+  void unknownPathIsNotAServerError() throws Exception {
+    mockMvc.perform(get("/skiers/no/such/route")).andExpect(status().isNotFound());
+    mockMvc.perform(get("/definitely-not-a-route")).andExpect(status().isNotFound());
+  }
+
+  @Test
+  @DisplayName("a wrong method is a 405, not a 500")
+  void wrongMethodIsNotAServerError() throws Exception {
+    mockMvc
+        .perform(get("/skiers/5/seasons/2025/days/1/skier/42"))
+        .andExpect(status().isMethodNotAllowed());
   }
 
   @Test
