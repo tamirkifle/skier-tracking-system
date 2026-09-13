@@ -1,6 +1,7 @@
 package skiers.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -8,6 +9,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -15,9 +18,16 @@ import org.mockito.ArgumentCaptor;
 import skiers.Constants;
 import skiers.ingest.DeliveryAck;
 import skiers.model.LiftRideEvent;
+import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.BatchWriteItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.BatchWriteItemResponse;
+import software.amazon.awssdk.services.dynamodb.model.ProvisionedThroughputExceededException;
 import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.PutItemResponse;
+import software.amazon.awssdk.services.dynamodb.model.PutRequest;
+import software.amazon.awssdk.services.dynamodb.model.WriteRequest;
 
 class WriterTest {
 
@@ -74,6 +84,147 @@ class WriterTest {
           writer.write(List.of(event("1", 1, 1), second, event("3", 3, 3)));
 
       assertThat(failed).containsExactly(second);
+    }
+  }
+
+  @Nested
+  @DisplayName("batching writer")
+  class Batching {
+
+    private final DynamoDbAsyncClient client = mock(DynamoDbAsyncClient.class);
+
+    private void respondWith(BatchWriteItemResponse response) {
+      when(client.batchWriteItem(any(BatchWriteItemRequest.class)))
+          .thenReturn(CompletableFuture.completedFuture(response));
+    }
+
+    @Test
+    @DisplayName("coalesces every event into one request")
+    void coalescesIntoOneRequest() throws Exception {
+      respondWith(BatchWriteItemResponse.builder().build());
+      BatchingLiftRideWriter writer = new BatchingLiftRideWriter(client, 25);
+
+      List<LiftRideEvent> events = List.of(event("1", 1, 1), event("2", 2, 2), event("3", 3, 3));
+      assertThat(writer.write(events)).isEmpty();
+
+      ArgumentCaptor<BatchWriteItemRequest> captor =
+          ArgumentCaptor.forClass(BatchWriteItemRequest.class);
+      verify(client, times(1)).batchWriteItem(captor.capture());
+      assertThat(captor.getValue().requestItems().get(Constants.LIFT_RIDES_TABLE)).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("batch size is clamped to the API's hard limit of 25")
+    void clampsToApiLimit() {
+      assertThat(new BatchingLiftRideWriter(client, 500).maxBatchSize())
+          .isEqualTo(Constants.MAX_BATCH_WRITE_ITEMS);
+      assertThat(new BatchingLiftRideWriter(client, 0).maxBatchSize()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("unprocessed items are returned for retry, not reported as written")
+    void returnsUnprocessedItems() throws Exception {
+      BatchingLiftRideWriter writer = new BatchingLiftRideWriter(client, 25);
+      LiftRideEvent throttled = event("2", 2, 2);
+      Map<String, AttributeValue> throttledItem = LiftRideItems.toAttributeMap(throttled);
+
+      respondWith(
+          BatchWriteItemResponse.builder()
+              .unprocessedItems(
+                  Map.of(
+                      Constants.LIFT_RIDES_TABLE,
+                      List.of(
+                          WriteRequest.builder()
+                              .putRequest(PutRequest.builder().item(throttledItem).build())
+                              .build())))
+              .build());
+
+      List<LiftRideEvent> deferred =
+          writer.write(List.of(event("1", 1, 1), throttled, event("3", 3, 3)));
+
+      // BatchWriteItem answers 200 with UnprocessedItems when individual items throttle.
+      assertThat(deferred).containsExactly(throttled);
+    }
+
+    @Test
+    @DisplayName(
+        "duplicate primary keys within a group are deferred, not allowed to fail the request")
+    void defersDuplicateKeysWithinAGroup() throws Exception {
+      respondWith(BatchWriteItemResponse.builder().build());
+      BatchingLiftRideWriter writer = new BatchingLiftRideWriter(client, 25);
+
+      // These two collide on the sort key, and DynamoDB rejects a request containing both.
+      LiftRideEvent first = event("42", 21, 100);
+      LiftRideEvent colliding = event("42", 7, 100);
+      assertThat(first.sortKey()).isEqualTo(colliding.sortKey());
+
+      List<LiftRideEvent> deferred = writer.write(List.of(first, colliding));
+
+      assertThat(deferred).containsExactly(colliding);
+      ArgumentCaptor<BatchWriteItemRequest> captor =
+          ArgumentCaptor.forClass(BatchWriteItemRequest.class);
+      verify(client).batchWriteItem(captor.capture());
+      assertThat(captor.getValue().requestItems().get(Constants.LIFT_RIDES_TABLE)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("N copies of one event write one item and defer the rest")
+    void deduplicatesRepeatedDeliveries() throws Exception {
+      respondWith(BatchWriteItemResponse.builder().build());
+      BatchingLiftRideWriter writer = new BatchingLiftRideWriter(client, 25);
+      LiftRideEvent event = event("42", 21, 100);
+
+      assertThat(writer.write(List.of(event, event, event))).hasSize(2);
+
+      ArgumentCaptor<BatchWriteItemRequest> captor =
+          ArgumentCaptor.forClass(BatchWriteItemRequest.class);
+      verify(client, times(1)).batchWriteItem(captor.capture());
+      assertThat(captor.getValue().requestItems().get(Constants.LIFT_RIDES_TABLE)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("an empty group is a no-op")
+    void emptyGroupIsNoOp() throws Exception {
+      BatchingLiftRideWriter writer = new BatchingLiftRideWriter(client, 25);
+      assertThat(writer.write(List.of())).isEmpty();
+      verify(client, times(0)).batchWriteItem(any(BatchWriteItemRequest.class));
+    }
+
+    @Test
+    @DisplayName("a request-level failure surfaces the SDK's own exception, not a wrapper")
+    void unwrapsAsyncFailures() {
+      BatchingLiftRideWriter writer = new BatchingLiftRideWriter(client, 25);
+      when(client.batchWriteItem(any(BatchWriteItemRequest.class)))
+          .thenReturn(
+              CompletableFuture.failedFuture(
+                  ProvisionedThroughputExceededException.builder().message("slow down").build()));
+
+      assertThatThrownBy(() -> writer.write(List.of(event("1", 1, 1))))
+          .isInstanceOf(ProvisionedThroughputExceededException.class);
+    }
+
+    @Test
+    @DisplayName("the shared item projection writes exactly the schema's attributes")
+    void itemProjectionMatchesTheSchema() {
+      Map<String, AttributeValue> attributes = LiftRideItems.toAttributeMap(event("42", 21, 217));
+
+      assertThat(attributes.keySet())
+          .containsExactlyInAnyOrder(
+              Constants.ATTR_SKIER_ID,
+              Constants.ATTR_SORT_KEY,
+              Constants.ATTR_RESORT_ID,
+              Constants.ATTR_SEASON_ID,
+              Constants.ATTR_DAY_ID,
+              Constants.ATTR_LIFT_ID,
+              Constants.ATTR_TIMESTAMP,
+              Constants.ATTR_VERTICAL,
+              Constants.ATTR_SKIER_SEASON,
+              Constants.ATTR_RESORT_DAY,
+              Constants.ATTR_RESORT_SKIER,
+              Constants.ATTR_SEASON_DAY,
+              Constants.ATTR_RESORT_SEASON_DAY);
+      assertThat(attributes.get(Constants.ATTR_VERTICAL).s()).isEqualTo("210");
+      assertThat(attributes.get(Constants.ATTR_SORT_KEY).s()).isEqualTo("5#2025#1#217");
     }
   }
 }
