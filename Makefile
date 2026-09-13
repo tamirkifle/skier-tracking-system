@@ -65,6 +65,47 @@ format-check: ## Fail if any file is unformatted
 .PHONY: lint
 lint: format-check ## Alias for format-check
 
+# --- Local stack -----------------------------------------------------------------------------
+
+.PHONY: up
+up: ## Start the whole system locally (broker, cache, DynamoDB, both services, Prometheus, Grafana)
+	$(COMPOSE) up -d --build
+	@$(MAKE) --no-print-directory wait
+	@echo ""
+	@echo "  API           $(SERVER_URL)"
+	@echo "  OpenAPI       $(SERVER_URL)/swagger-ui.html"
+	@echo "  Health        $(SERVER_URL)/actuator/health"
+	@echo "  Metrics       $(SERVER_URL)/actuator/prometheus"
+	@echo "  RabbitMQ      http://localhost:15672  (guest/guest)"
+	@echo "  Prometheus    http://localhost:9090"
+	@echo "  Grafana       http://localhost:3000   (anonymous viewer)"
+	@echo ""
+
+.PHONY: wait
+wait: ## Block until the server reports ready
+	@printf "Waiting for the server to become ready"
+	@for i in $$(seq 1 90); do \
+		if curl -fsS $(SERVER_URL)/actuator/health/readiness >/dev/null 2>&1; then \
+			echo " ready."; exit 0; \
+		fi; \
+		printf "."; sleep 2; \
+	done; \
+	echo " timed out."; \
+	echo "Recent logs:"; $(COMPOSE) logs --tail=40 server; \
+	exit 1
+
+.PHONY: down
+down: ## Stop the stack and delete its volumes
+	$(COMPOSE) down -v --remove-orphans
+
+.PHONY: logs
+logs: ## Follow logs from both services
+	$(COMPOSE) logs -f server consumer
+
+.PHONY: ps
+ps: ## Show container status
+	$(COMPOSE) ps
+
 .PHONY: schema
 schema: ## Re-apply the DynamoDB schema (idempotent)
 	$(COMPOSE) run --rm schema

@@ -89,6 +89,78 @@ services:
     restart: "no"
     networks: [skiers]
 
+  # --- Services ----------------------------------------------------------------------------
+  server:
+    build:
+      context: .
+      dockerfile: Server/SkierServer/Dockerfile
+    container_name: skiers-server
+    ports:
+      - "8080:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      schema:
+        condition: service_completed_successfully
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      REDIS_HOST: redis
+      AWS_REGION: us-west-2
+      AWS_DYNAMODB_ENDPOINT: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      # Substituted from the host environment with a default for local runs:
+      #   ADMISSION_INITIAL_CAPACITY=8000 docker compose up -d --force-recreate server
+      ADMISSION_INITIAL_CAPACITY: "${ADMISSION_INITIAL_CAPACITY:-2000}"
+      ADMISSION_MAX_WAIT_MS: "${ADMISSION_MAX_WAIT_MS:-250}"
+      # The floor on shedding is fleet-wide; with `--scale server=N` each replica takes 1/N.
+      ADMISSION_MIN_RATE: "${ADMISSION_MIN_RATE:-100}"
+      FLEET_COORDINATION_ENABLED: "${FLEET_COORDINATION_ENABLED:-true}"
+      FLEET_HEARTBEAT_INTERVAL_MS: "${FLEET_HEARTBEAT_INTERVAL_MS:-2000}"
+      FLEET_MEMBER_TTL_MS: "${FLEET_MEMBER_TTL_MS:-10000}"
+      FLEET_SHRINK_CONFIRMATIONS: "${FLEET_SHRINK_CONFIRMATIONS:-3}"
+      QUEUE_MONITOR_ENABLED: "${QUEUE_MONITOR_ENABLED:-true}"
+      QUEUE_MONITOR_INTERVAL_MS: "${QUEUE_MONITOR_INTERVAL_MS:-200}"
+      QUEUE_MONITOR_SETPOINT_MODE: "${QUEUE_MONITOR_SETPOINT_MODE:-depth}"
+      QUEUE_MONITOR_TARGET_LATENCY: "${QUEUE_MONITOR_TARGET_LATENCY:-1875ms}"
+      QUEUE_MONITOR_MAX_LATENCY: "${QUEUE_MONITOR_MAX_LATENCY:-2500ms}"
+      QUEUE_MONITOR_MIN_LATENCY: "${QUEUE_MONITOR_MIN_LATENCY:-1250ms}"
+      QUEUE_MONITOR_DRAIN_RATE_WINDOW: "${QUEUE_MONITOR_DRAIN_RATE_WINDOW:-10s}"
+      TOMCAT_MAX_THREADS: "${TOMCAT_MAX_THREADS:-400}"
+      TRACING_SAMPLE_RATE: "${TRACING_SAMPLE_RATE:-1.0}"
+    networks: [skiers]
+
+  consumer:
+    build:
+      context: .
+      dockerfile: Consumer/SkierConsumer/Dockerfile
+    container_name: skiers-consumer
+    ports:
+      - "8085:8085"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      schema:
+        condition: service_completed_successfully
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      REDIS_HOST: redis
+      AWS_REGION: us-west-2
+      AWS_DYNAMODB_ENDPOINT: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      CONSUMER_CONCURRENCY: "${CONSUMER_CONCURRENCY:-16}"
+      CONSUMER_PREFETCH: "${CONSUMER_PREFETCH:-200}"
+      WRITER_MODE: "${WRITER_MODE:-batch}"
+      WRITER_BATCH_SIZE: "${WRITER_BATCH_SIZE:-25}"
+      WRITER_LINGER_MS: "${WRITER_LINGER_MS:-20}"
+      WRITER_THREADS: "${WRITER_THREADS:-8}"
+      CARDINALITY_STRATEGY: "${CARDINALITY_STRATEGY:-dynamodb}"
+      TRACING_SAMPLE_RATE: "${TRACING_SAMPLE_RATE:-1.0}"
+    networks: [skiers]
+
 networks:
   skiers:
     driver: bridge
