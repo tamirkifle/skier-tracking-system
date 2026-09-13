@@ -122,6 +122,12 @@ schema: ## Re-apply the DynamoDB schema (idempotent)
 smoke: ## Post one event and read it back through every query endpoint
 	@bash scripts/smoke.sh
 
+# Dry run unless REPAIR_ARGS says otherwise, because the scan is not a snapshot and applying it
+# against live ingestion writes a total that omits whatever landed behind the cursor.
+.PHONY: repair-cardinality
+repair-cardinality: ## Recount SkierCounts from the SkierTracking sentinels (report; add REPAIR_ARGS to apply)
+	@bash scripts/repair-cardinality.sh $(REPAIR_ARGS)
+
 # Deliberately not folded into `smoke`: one run costs the longest TTL it measures (5 minutes with
 # --include-totals), which is too slow for a check that gates `make ci-local`.
 .PHONY: queryability
