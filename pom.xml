@@ -33,6 +33,7 @@
     <module>Infra/SchemaTool</module>
     <module>Server/SkierServer</module>
     <module>Consumer/SkierConsumer</module>
+    <module>Client/SkierClient</module>
   </modules>
 
   <properties>
