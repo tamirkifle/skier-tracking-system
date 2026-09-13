@@ -107,6 +107,16 @@ class LiftRidePublisherTest {
   }
 
   @Test
+  @DisplayName("an unroutable publish is rejected even though the broker acked it")
+  void rejectedOnReturn() {
+    StubTemplate template = new StubTemplate();
+    template.returnsAsUnroutable();
+
+    assertThat(publisher(template, 1000).publish("evt-3", BODY, 1_700_000_000_000L))
+        .isEqualTo(PublishOutcome.REJECTED);
+  }
+
+  @Test
   @DisplayName("a publish that throws is rejected without waiting for a confirm")
   void rejectedWhenSendThrows() {
     StubTemplate template = new StubTemplate();
