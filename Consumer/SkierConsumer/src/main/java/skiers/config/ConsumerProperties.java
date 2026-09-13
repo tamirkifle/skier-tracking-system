@@ -8,8 +8,14 @@ public class ConsumerProperties {
 
   @NestedConfigurationProperty private final Writer writer = new Writer();
 
+  @NestedConfigurationProperty private final Cardinality cardinality = new Cardinality();
+
   public Writer getWriter() {
     return writer;
+  }
+
+  public Cardinality getCardinality() {
+    return cardinality;
   }
 
   public static class Writer {
@@ -96,6 +102,25 @@ public class ConsumerProperties {
     public enum Mode {
       SINGLE,
       BATCH
+    }
+  }
+
+  public static class Cardinality {
+    private Strategy strategy = Strategy.DYNAMODB;
+
+    public Strategy getStrategy() {
+      return strategy;
+    }
+
+    public void setStrategy(Strategy strategy) {
+      this.strategy = strategy;
+    }
+
+    public enum Strategy {
+      /** Exact. One conditional PutItem sentinel per first sighting of a skier. */
+      DYNAMODB,
+      /** Approximate (~0.81% relative error), fixed 12 KiB per resort-day, one Redis op. */
+      REDIS_HLL
     }
   }
 }
