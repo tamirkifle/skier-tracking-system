@@ -34,6 +34,11 @@ public final class Constants {
   public static final int MIN_TIME = 1;
   public static final int MAX_TIME = 360;
 
+  public static final String INVALID_PATH_PARAMETERS = "Invalid path parameters";
+  public static final String INVALID_LIFT_RIDE_DATA = "Invalid LiftRide data";
+  public static final String RATE_LIMIT_EXCEEDED = "Rate limit exceeded";
+  public static final String SERVER_ERROR = "Server Error: ";
+
   public static final int MAX_DB_CONNECTION = 500;
   public static final int DB_CONNECTION_TIMEOUT = 10_000;
   public static final int DB_REQUEST_TIMEOUT = 20_000;
