@@ -1,5 +1,6 @@
 package skiers.ingest;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -30,6 +31,20 @@ class AmqpDeliveryAckTest {
   @BeforeEach
   void setUp() {
     channel = mock(Channel.class);
+  }
+
+  /** A {@link RetryRouter} that records what it was asked to republish. */
+  private static final class CapturingRouter implements RetryRouter {
+    private final List<Integer> attempts = new ArrayList<>();
+    private Message lastMessage;
+    private boolean accept = true;
+
+    @Override
+    public boolean republish(Message original, int attempt) {
+      lastMessage = original;
+      attempts.add(attempt);
+      return accept;
+    }
   }
 
   private static Message delivery() {
@@ -132,5 +147,42 @@ class AmqpDeliveryAckTest {
               DeliveryAck.NONE.retryLater(1);
             })
         .doesNotThrowAnyException();
+  }
+
+  @Test
+  @DisplayName("a retry acks the original only after the delay route confirmed the copy")
+  void retryAcksAfterTheCopyIsConfirmed() throws Exception {
+    CapturingRouter router = new CapturingRouter();
+
+    // Acking before the copy is confirmed would lose the event.
+    assertThat(ack(7L, router).retryLater(3)).isTrue();
+
+    assertThat(router.attempts).containsExactly(3);
+    assertThat(router.lastMessage.getMessageProperties().getMessageId()).isEqualTo("evt-1");
+    verify(channel).basicAck(7L, false);
+    verify(channel, times(0)).basicNack(anyLong(), anyBoolean(), anyBoolean());
+  }
+
+  @Test
+  @DisplayName("a refused retry requeues the delivery unchanged rather than acking it")
+  void refusedRetryRequeuesInstead() throws Exception {
+    CapturingRouter router = new CapturingRouter();
+    router.accept = false;
+
+    assertThat(ack(7L, router).retryLater(3)).isFalse();
+
+    verify(channel).basicNack(7L, false, true);
+    verify(channel, times(0)).basicAck(anyLong(), anyBoolean());
+  }
+
+  @Test
+  @DisplayName("a retry on an already-settled delivery does nothing")
+  void retryAfterSettlementIsInert() throws Exception {
+    CapturingRouter router = new CapturingRouter();
+    AmqpDeliveryAck ack = ack(7L, router);
+    ack.ack();
+
+    assertThat(ack.retryLater(2)).isFalse();
+    assertThat(router.attempts).isEmpty();
   }
 }
