@@ -17,4 +17,8 @@ public final class Constants {
 
   /** Vertical feet gained per lift ride: liftID x 10. */
   public static final int VERTICAL_FEET_PER_LIFT = 10;
+
+  public static final int MAX_DB_CONNECTION = 500;
+  public static final int DB_CONNECTION_TIMEOUT = 10_000;
+  public static final int DB_REQUEST_TIMEOUT = 20_000;
 }

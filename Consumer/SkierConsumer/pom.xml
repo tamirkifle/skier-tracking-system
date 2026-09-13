@@ -27,6 +27,21 @@
       <artifactId>spring-boot-starter-web</artifactId>
     </dependency>
 
+    <!-- Persistence -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>dynamodb</artifactId>
+    </dependency>
+    <!--
+      The sync HTTP client, declared rather than inherited transitively: AwsConfig configures its
+      connection pool by name, so a transitive it happened to receive would make the pool size a
+      property of the dependency tree instead of a decision.
+    -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>apache-client</artifactId>
+    </dependency>
+
     <!-- Test -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
