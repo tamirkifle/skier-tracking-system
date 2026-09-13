@@ -8,6 +8,7 @@ ifeq (,$(wildcard ./mvnw))
 MVN := mvn
 endif
 
+COMPOSE ?= docker compose
 SERVER_URL ?= http://localhost:8080
 BENCH_OUT ?= benchmarks/out
 
@@ -63,6 +64,10 @@ format-check: ## Fail if any file is unformatted
 
 .PHONY: lint
 lint: format-check ## Alias for format-check
+
+.PHONY: schema
+schema: ## Re-apply the DynamoDB schema (idempotent)
+	$(COMPOSE) run --rm schema
 
 # --- Benchmarks ------------------------------------------------------------------------------
 

@@ -71,6 +71,24 @@ services:
       start_period: 15s
     networks: [skiers]
 
+  # --- Schema ------------------------------------------------------------------------------
+  # Runs to completion, then exits. The services wait on its success rather than racing it.
+  schema:
+    build:
+      context: .
+      dockerfile: Infra/SchemaTool/Dockerfile
+    container_name: skiers-schema
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      AWS_REGION: us-west-2
+      AWS_DYNAMODB_ENDPOINT: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    restart: "no"
+    networks: [skiers]
+
 networks:
   skiers:
     driver: bridge
