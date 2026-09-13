@@ -184,4 +184,34 @@ class RedisFleetRegistryTest {
     assertThat(registry.size()).isEqualTo(4);
     assertThat(meters.get("skier.fleet.registry.failures").counter().count()).isEqualTo(1.0);
   }
+
+  @Test
+  @DisplayName("a registry that has never completed a refresh reports itself unsized")
+  void aRegistryThatHasNeverRefreshedIsNotSized() {
+    StringRedisTemplate redis = templateReporting(2L);
+    RedisFleetRegistry registry =
+        new RedisFleetRegistry(redis, properties(), new SimpleMeterRegistry());
+
+    assertThat(registry.isSized()).as("before any refresh").isFalse();
+
+    when(redis.opsForZSet()).thenThrow(new IllegalStateException("connection refused"));
+    registry.refresh();
+    assertThat(registry.isSized()).as("a failed refresh is not an observation").isFalse();
+  }
+
+  @Test
+  @DisplayName("one successful refresh is enough to be sized, permanently")
+  void oneSuccessfulRefreshSizesTheRegistry() {
+    StringRedisTemplate redis = templateReporting(2L);
+    RedisFleetRegistry registry =
+        new RedisFleetRegistry(redis, properties(), new SimpleMeterRegistry());
+
+    registry.refresh();
+    assertThat(registry.isSized()).isTrue();
+
+    when(redis.opsForZSet()).thenThrow(new IllegalStateException("connection refused"));
+    registry.refresh();
+    assertThat(registry.isSized()).as("still an observation, just a stale one").isTrue();
+    assertThat(registry.size()).isEqualTo(2);
+  }
 }
