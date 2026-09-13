@@ -116,6 +116,10 @@ ps: ## Show container status
 schema: ## Re-apply the DynamoDB schema (idempotent)
 	$(COMPOSE) run --rm schema
 
+.PHONY: smoke
+smoke: ## Post one event and read it back through every query endpoint
+	@bash scripts/smoke.sh
+
 # --- Benchmarks ------------------------------------------------------------------------------
 
 .PHONY: bench
