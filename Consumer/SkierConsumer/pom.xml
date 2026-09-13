@@ -64,6 +64,11 @@
       <artifactId>micrometer-tracing-bridge-brave</artifactId>
     </dependency>
 
+    <dependency>
+      <groupId>jakarta.annotation</groupId>
+      <artifactId>jakarta.annotation-api</artifactId>
+    </dependency>
+
     <!-- Test -->
     <dependency>
       <groupId>org.springframework.boot</groupId>

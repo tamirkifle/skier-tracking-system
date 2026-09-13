@@ -1,6 +1,7 @@
 package skiers;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
@@ -243,6 +244,45 @@ public class SkierDataProcessor {
       // is recorded nowhere. Counted apart from retries: this is where the budget stops binding.
       metrics.recordRetryHandoffFailed();
     }
+  }
+
+  @PreDestroy
+  public void shutdown() {
+    if (!running.compareAndSet(true, false)) {
+      return;
+    }
+    logger.info("Draining write pipeline ({} event(s) staged)", stagingQueue.size());
+
+    boolean drained;
+    try {
+      drained = writersStopped.await(30, TimeUnit.SECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      drained = false;
+    }
+
+    if (!drained) {
+      logger.warn("Writers did not drain in 30s; interrupting");
+      writerThreads.forEach(Thread::interrupt);
+      try {
+        drained = writersStopped.await(5, TimeUnit.SECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+    }
+
+    List<LiftRideEvent> abandoned = new ArrayList<>();
+    stagingQueue.drainTo(abandoned);
+    abandoned.forEach(event -> event.ack().reject(true));
+
+    logger.info(
+        "Write pipeline stopped. written={}, retried={}, dead-lettered={}, returned-to-broker={}, "
+            + "clean-drain={}",
+        metrics.writtenCount(),
+        metrics.retryCount(),
+        metrics.droppedCount(),
+        abandoned.size(),
+        drained);
   }
 
   public int stagedCount() {
