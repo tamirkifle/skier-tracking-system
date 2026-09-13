@@ -1,11 +1,15 @@
 package skiers.infra;
 
+import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClientBuilder;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
@@ -49,6 +53,94 @@ public final class CardinalityRepair {
     public boolean needsRepair() {
       return recounted > stored;
     }
+  }
+
+  public static void main(String[] args) {
+    String endpoint = System.getenv("AWS_DYNAMODB_ENDPOINT");
+    boolean apply = false;
+    boolean confirmed = false;
+
+    for (int i = 0; i < args.length; i++) {
+      switch (args[i]) {
+        case "--endpoint" -> endpoint = args[++i];
+        case "--apply" -> apply = true;
+        case "--confirm-ingest-paused" -> confirmed = true;
+        case "--dry-run" -> apply = false;
+        default -> {
+          logger.error("Unknown argument: {}", args[i]);
+          usage();
+          System.exit(64);
+        }
+      }
+    }
+
+    if (apply && !confirmed) {
+      // Refused rather than warned; the omission looks exactly like the fault being repaired.
+      logger.error(
+          "--apply requires --confirm-ingest-paused: recounting while events are being consumed "
+              + "writes a total that omits everything claimed after the scan passed its page");
+      System.exit(64);
+    }
+
+    String region = System.getenv("AWS_REGION") == null ? "us-west-2" : System.getenv("AWS_REGION");
+    DynamoDbClientBuilder builder =
+        DynamoDbClient.builder()
+            .credentialsProvider(DefaultCredentialsProvider.create())
+            .region(Region.of(region));
+    if (endpoint != null && !endpoint.isBlank()) {
+      builder.endpointOverride(URI.create(endpoint));
+    }
+
+    try (DynamoDbClient client = builder.build()) {
+      CardinalityRepair repair = new CardinalityRepair(client);
+      Map<String, Finding> findings = repair.recount();
+
+      long repairs = findings.values().stream().filter(Finding::needsRepair).count();
+      long decreases = findings.values().stream().filter(f -> f.recounted() < f.stored()).count();
+
+      findings.forEach(
+          (key, finding) -> {
+            if (finding.needsRepair()) {
+              logger.warn(
+                  "{}: stored {}, sentinels {}, short by {}",
+                  key,
+                  finding.stored(),
+                  finding.recounted(),
+                  finding.shortfall());
+            } else if (finding.recounted() < finding.stored()) {
+              logger.info(
+                  "{}: stored {}, sentinels {}, skipped, a recount below the stored value is "
+                      + "expired sentinels far more often than a wrong count",
+                  key,
+                  finding.stored(),
+                  finding.recounted());
+            } else {
+              logger.info("{}: {}, agrees", key, finding.stored());
+            }
+          });
+
+      logger.info(
+          "{} resort-day(s) examined, {} short, {} skipped as decreases",
+          findings.size(),
+          repairs,
+          decreases);
+
+      if (!apply) {
+        logger.info("Dry run. Re-run with --apply --confirm-ingest-paused to write the repairs.");
+        return;
+      }
+
+      int written = repair.apply(findings);
+      logger.info("{} of {} repair(s) written", written, repairs);
+    } catch (RuntimeException e) {
+      logger.error("Cardinality repair failed: {}", e.getMessage(), e);
+      System.exit(2);
+    }
+  }
+
+  private static void usage() {
+    logger.info(
+        "usage: CardinalityRepair [--endpoint URL] [--apply --confirm-ingest-paused | --dry-run]");
   }
 
   /** A full scan: nothing indexes {@code resortSeasonDay}, and the table is keyed by skierKey. */
