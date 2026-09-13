@@ -2,6 +2,7 @@ package skiers.service;
 
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -34,8 +35,23 @@ public class RateLimiter {
   private final AtomicInteger capacity = new AtomicInteger();
   private final AtomicInteger tokens = new AtomicInteger();
 
+  /**
+   * Fractional permits carried between refills, scaled by 1000. Integer truncation of the per-tick
+   * rate leaks permits on every tick without it, and starves any rate below one permit per tick.
+   */
+  private final AtomicLong carryMillis = new AtomicLong();
+
   private final AtomicLong granted = new AtomicLong();
   private final AtomicLong rejected = new AtomicLong();
+
+  /** The bucket delivers the decided rate only if this loop runs on time; the gap is a maximum. */
+  private final AtomicLong refillInvocations = new AtomicLong();
+
+  private final AtomicLong refillMaxGapNanos = new AtomicLong();
+  private final AtomicLong lastRefillNanos = new AtomicLong();
+
+  /** Discarded permits, so {@code granted + discarded + tokens} accounts for the whole budget. */
+  private final AtomicLong permitsDiscarded = new AtomicLong();
 
   public RateLimiter(SkierProperties properties, MeterRegistry registry, FleetRegistry fleet) {
     this.config = properties.getAdmission();
@@ -76,6 +92,33 @@ public class RateLimiter {
     Gauge.builder("skier.admission.rejected", rejected, AtomicLong::get)
         .description("Permit requests denied since start")
         .register(registry);
+    Gauge.builder("skier.admission.refill.invocations", refillInvocations, AtomicLong::get)
+        .description("Refill loop invocations since start; nominally 1000/refill-interval-ms per s")
+        .register(registry);
+    Gauge.builder("skier.admission.refill.gap.max", this, RateLimiter::refillMaxGapSeconds)
+        .baseUnit("seconds")
+        .description("Worst observed interval between two consecutive refill loop invocations")
+        .register(registry);
+    Gauge.builder("skier.admission.permits.discarded", permitsDiscarded, AtomicLong::get)
+        .description("Permits the refill budget produced that the bucket could not hold")
+        .register(registry);
+  }
+
+  @PostConstruct
+  public void init() {
+    int initial = clamp(config.getInitialCapacity());
+    capacity.set(initial);
+    tokens.set(initial);
+    scheduler.scheduleAtFixedRate(
+        this::refill,
+        config.getRefillIntervalMs(),
+        config.getRefillIntervalMs(),
+        TimeUnit.MILLISECONDS);
+    logger.info(
+        "Admission control armed at {} permits/s (refill every {}ms, max wait {}ms)",
+        initial,
+        config.getRefillIntervalMs(),
+        config.getMaxWaitMs());
   }
 
   @PreDestroy
@@ -106,6 +149,32 @@ public class RateLimiter {
       }
     }
     return false;
+  }
+
+  /**
+   * Mints one tick's worth of permits, per invocation rather than per elapsed second. A missed tick
+   * is repaid as a catch-up burst into a bucket one second deep, and the excess is discarded.
+   */
+  void refill() {
+    long now = System.nanoTime();
+    long previous = lastRefillNanos.getAndSet(now);
+    if (previous != 0L) {
+      long gap = now - previous;
+      refillMaxGapNanos.accumulateAndGet(gap, Math::max);
+    }
+    refillInvocations.incrementAndGet();
+
+    int currentCapacity = capacity.get();
+    long budget = carryMillis.get() + (long) currentCapacity * config.getRefillIntervalMs();
+    long whole = budget / 1000L;
+    carryMillis.set(budget - whole * 1000L);
+    if (whole <= 0) {
+      return;
+    }
+    int added = addTokens((int) Math.min(whole, currentCapacity), currentCapacity);
+    if (added < whole) {
+      permitsDiscarded.addAndGet(whole - added);
+    }
   }
 
   private int addTokens(int toAdd, int cap) {
@@ -150,5 +219,17 @@ public class RateLimiter {
 
   public long rejectedCount() {
     return rejected.get();
+  }
+
+  public long refillInvocations() {
+    return refillInvocations.get();
+  }
+
+  public double refillMaxGapSeconds() {
+    return refillMaxGapNanos.get() / 1_000_000_000.0;
+  }
+
+  public long permitsDiscardedCount() {
+    return permitsDiscarded.get();
   }
 }
