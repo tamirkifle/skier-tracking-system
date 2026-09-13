@@ -160,4 +160,27 @@ class RateLimiterTest {
         .as("must give up promptly rather than looping 100,000 times at 5ms")
         .isLessThan(1_000);
   }
+
+  @Test
+  @DisplayName("rate adjustments clamp to the configured bounds")
+  void adjustmentsClamp() {
+    RateLimiter rateLimiter = build(1000, 600_000, 0);
+
+    rateLimiter.adjustRateUp(Integer.MAX_VALUE);
+    assertThat(rateLimiter.getCurrentRate()).isEqualTo(Constants.MAX_RATE);
+
+    rateLimiter.adjustRateDown(0);
+    assertThat(rateLimiter.getCurrentRate()).isEqualTo(DEFAULT_FLOOR);
+  }
+
+  @Test
+  @DisplayName("shrinking the rate also shrinks permits already in the bucket")
+  void shrinkingRateTrimsTheBucket() {
+    RateLimiter rateLimiter = build(Constants.MAX_RATE, 600_000, 0);
+    assertThat(rateLimiter.availableTokens()).isEqualTo(Constants.MAX_RATE);
+
+    rateLimiter.adjustRateDown(DEFAULT_FLOOR);
+
+    assertThat(rateLimiter.availableTokens()).isEqualTo(DEFAULT_FLOOR);
+  }
 }
