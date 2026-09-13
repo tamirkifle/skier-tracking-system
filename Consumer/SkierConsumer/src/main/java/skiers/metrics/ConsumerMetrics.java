@@ -11,6 +11,10 @@ import org.springframework.stereotype.Component;
 public class ConsumerMetrics {
 
   private final Counter written;
+  private final Counter retried;
+  private final Counter dropped;
+  private final Counter requeued;
+  private final Counter retryHandoffFailed;
   private final Counter projectionUnresolved;
   private final Counter duplicateSuppressed;
   private final Counter uniqueSkiersObserved;
@@ -23,6 +27,24 @@ public class ConsumerMetrics {
     this.written =
         Counter.builder("skier.write.total")
             .description("Lift-ride items durably persisted to DynamoDB")
+            .register(registry);
+    this.retried =
+        Counter.builder("skier.write.retries")
+            .description("Write attempts that failed transiently and were retried")
+            .register(registry);
+    this.dropped =
+        Counter.builder("skier.write.dropped")
+            .description("Events dead-lettered after exhausting the retry budget")
+            .register(registry);
+    this.requeued =
+        Counter.builder("skier.write.requeued")
+            .description("Events returned to the broker because the writer could not accept them")
+            .register(registry);
+    this.retryHandoffFailed =
+        Counter.builder("skier.write.retry.handoff.failed")
+            .description(
+                "Retries the delay route would not accept, so the delivery was requeued and its "
+                    + "attempt was not recorded")
             .register(registry);
     this.projectionUnresolved =
         Counter.builder("skier.cardinality.projection.unresolved")
@@ -63,8 +85,24 @@ public class ConsumerMetrics {
     writeLatency.record(nanos, java.util.concurrent.TimeUnit.NANOSECONDS);
   }
 
+  public void recordRetry() {
+    retried.increment();
+  }
+
+  public void recordDropped() {
+    dropped.increment();
+  }
+
+  public void recordRetryHandoffFailed() {
+    retryHandoffFailed.increment();
+  }
+
   public void recordProjectionUnresolved() {
     projectionUnresolved.increment();
+  }
+
+  public void recordRequeued() {
+    requeued.increment();
   }
 
   public void recordUniqueSkier() {
@@ -86,5 +124,13 @@ public class ConsumerMetrics {
 
   public long writtenCount() {
     return (long) written.count();
+  }
+
+  public long droppedCount() {
+    return (long) dropped.count();
+  }
+
+  public long retryCount() {
+    return (long) retried.count();
   }
 }
