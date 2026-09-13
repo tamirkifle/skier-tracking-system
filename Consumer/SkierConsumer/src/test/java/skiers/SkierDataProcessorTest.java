@@ -119,6 +119,73 @@ class SkierDataProcessorTest {
   }
 
   @Test
+  @DisplayName("a whole-request failure sends every event in the group to the delay route")
+  void retriesOnWriteFailure() {
+    build(1, 1, 0, 100, 3);
+    writer.failEveryWriteWith(new IllegalStateException("throttled"));
+
+    RecordingAck ack = new RecordingAck();
+    processor.submit(event(42, 100, ack));
+
+    await().atMost(Duration.ofSeconds(5)).until(() -> ack.delayedRetries() == 1);
+    assertThat(ack.acks()).isZero();
+    assertThat(ack.deadLetters()).isZero();
+    assertThat(ack.lastAttempt()).isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName("a delay route that will not take the retry requeues instead of acking")
+  void requeuesWhenTheDelayRouteRefuses() {
+    build(1, 1, 0, 100, 3);
+    writer.failEveryWriteWith(new IllegalStateException("throttled"));
+
+    RecordingAck ack = new RecordingAck();
+    ack.breakRetryRoute();
+    processor.submit(event(42, 100, ack));
+
+    await().atMost(Duration.ofSeconds(5)).until(() -> ack.requeues() == 1);
+    assertThat(ack.acks()).isZero();
+    assertThat(registry.get("skier.write.retry.handoff.failed").counter().count()).isEqualTo(1.0);
+  }
+
+  @Test
+  @DisplayName("an event that exhausts its retry budget is dead-lettered, not retried forever")
+  void deadLettersAfterRetryBudget() {
+    build(1, 1, 0, 100, 2);
+    writer.failEveryWriteWith(new IllegalStateException("permanently broken"));
+
+    // Each delivery is a new event seeded from the count the previous one handed back.
+    int attempts = 0;
+    for (int delivery = 1; delivery <= 3; delivery++) {
+      RecordingAck ack = new RecordingAck();
+      processor.submit(event(42, 100, ack, attempts));
+
+      if (delivery <= 2) {
+        int expected = delivery;
+        await().atMost(Duration.ofSeconds(5)).until(() -> ack.delayedRetries() == 1);
+        assertThat(ack.lastAttempt()).isEqualTo(expected);
+        attempts = ack.lastAttempt();
+      } else {
+        await().atMost(Duration.ofSeconds(5)).until(() -> ack.deadLetters() == 1);
+        assertThat(ack.delayedRetries()).isZero();
+      }
+    }
+  }
+
+  @Test
+  @DisplayName("a delivery that arrives with a spent budget is dead-lettered on its first attempt")
+  void honoursAnAlreadySpentBudgetFromTheWire() {
+    build(1, 1, 0, 100, 2);
+    writer.failEveryWriteWith(new IllegalStateException("permanently broken"));
+
+    RecordingAck ack = new RecordingAck();
+    processor.submit(event(42, 100, ack, 2));
+
+    await().atMost(Duration.ofSeconds(5)).until(() -> ack.deadLetters() == 1);
+    assertThat(ack.delayedRetries()).isZero();
+  }
+
+  @Test
   @DisplayName("unprocessed items are retried while their successful neighbours are acknowledged")
   void settlesPartialBatchIndependently() {
     build(1, 5, 50, 100, 3);
