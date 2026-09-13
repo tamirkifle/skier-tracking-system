@@ -151,6 +151,21 @@ public class RateLimiter {
     return false;
   }
 
+  public void adjustRateUp(int newRate) {
+    setRate(Math.min(newRate, Constants.MAX_RATE));
+  }
+
+  public void adjustRateDown(int newRate) {
+    setRate(Math.max(newRate, effectiveFloor()));
+  }
+
+  private void setRate(int newRate) {
+    int adjusted = clamp(newRate);
+    capacity.set(adjusted);
+    // Shrinking the bucket must shrink what is in it, or the previous rate's backlog goes first.
+    tokens.updateAndGet(current -> Math.min(current, adjusted));
+  }
+
   /**
    * Mints one tick's worth of permits, per invocation rather than per elapsed second. A missed tick
    * is repaid as a catch-up burst into a bucket one second deep, and the excess is discarded.
