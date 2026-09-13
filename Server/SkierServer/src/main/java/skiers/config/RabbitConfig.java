@@ -9,6 +9,10 @@ import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
+import org.springframework.amqp.support.converter.MessageConverter;
+import org.springframework.boot.autoconfigure.amqp.RabbitTemplateConfigurer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import skiers.Constants;
@@ -57,5 +61,41 @@ public class RabbitConfig {
   @Bean
   public RabbitAdmin rabbitAdmin(ConnectionFactory connectionFactory) {
     return new RabbitAdmin(connectionFactory);
+  }
+
+  @Bean
+  public MessageConverter jsonMessageConverter() {
+    return new Jackson2JsonMessageConverter();
+  }
+
+  /** Built by RabbitTemplateConfigurer, so spring.rabbitmq.template.mandatory applies. */
+  @Bean
+  public RabbitTemplate rabbitTemplate(
+      RabbitTemplateConfigurer configurer,
+      ConnectionFactory connectionFactory,
+      MessageConverter messageConverter) {
+    RabbitTemplate template = new RabbitTemplate();
+    configurer.configure(template, connectionFactory);
+    template.setMessageConverter(messageConverter);
+
+    template.setConfirmCallback(
+        (correlation, acked, cause) -> {
+          if (!acked) {
+            logger.error(
+                "Broker nacked publish (correlation={}): {}",
+                correlation == null ? "none" : correlation.getId(),
+                cause);
+          }
+        });
+
+    template.setReturnsCallback(
+        returned ->
+            logger.error(
+                "Message returned as unroutable: exchange={} routingKey={} replyText={}",
+                returned.getExchange(),
+                returned.getRoutingKey(),
+                returned.getReplyText()));
+
+    return template;
   }
 }
