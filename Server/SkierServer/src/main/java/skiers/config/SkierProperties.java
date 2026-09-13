@@ -15,6 +15,8 @@ public class SkierProperties {
 
   @NestedConfigurationProperty private final Cache cache = new Cache();
 
+  @NestedConfigurationProperty private final Fleet fleet = new Fleet();
+
   public Admission getAdmission() {
     return admission;
   }
@@ -52,6 +54,10 @@ public class SkierProperties {
 
   public Cache getCache() {
     return cache;
+  }
+
+  public Fleet getFleet() {
+    return fleet;
   }
 
   public static class Admission {
@@ -184,6 +190,61 @@ public class SkierProperties {
 
     public void setDrainRateWindow(Duration drainRateWindow) {
       this.drainRateWindow = drainRateWindow;
+    }
+  }
+
+  /** Shares the instance count, not the rate, which N instances would collapse by 1/2^N. */
+  public static class Fleet {
+
+    private boolean coordinationEnabled = true;
+
+    private String key = "skier:admission:fleet";
+
+    private long heartbeatIntervalMs = 2000;
+
+    private long memberTtlMs = 10000;
+
+    /** Growth applies at once; a decrease needs a streak, so a restart blip is ignored. */
+    private int shrinkConfirmations = 3;
+
+    public boolean isCoordinationEnabled() {
+      return coordinationEnabled;
+    }
+
+    public void setCoordinationEnabled(boolean coordinationEnabled) {
+      this.coordinationEnabled = coordinationEnabled;
+    }
+
+    public String getKey() {
+      return key;
+    }
+
+    public void setKey(String key) {
+      this.key = key;
+    }
+
+    public long getHeartbeatIntervalMs() {
+      return heartbeatIntervalMs;
+    }
+
+    public void setHeartbeatIntervalMs(long heartbeatIntervalMs) {
+      this.heartbeatIntervalMs = heartbeatIntervalMs;
+    }
+
+    public long getMemberTtlMs() {
+      return memberTtlMs;
+    }
+
+    public void setMemberTtlMs(long memberTtlMs) {
+      this.memberTtlMs = memberTtlMs;
+    }
+
+    public int getShrinkConfirmations() {
+      return shrinkConfirmations;
+    }
+
+    public void setShrinkConfirmations(int shrinkConfirmations) {
+      this.shrinkConfirmations = shrinkConfirmations;
     }
   }
 
