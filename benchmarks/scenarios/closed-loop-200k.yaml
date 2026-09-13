@@ -24,10 +24,8 @@ http:
   retry-base-backoff-ms: 50
 
 phases:
-  # Excluded from results. The first few thousand requests measure interpreted
-  # bytecode, a cold connection pool and an empty JIT profile, including them
-  # does not make the measurement more honest, it makes it wrong by an amount
-  # nobody can quantify afterwards.
+  # Excluded from results: the first few thousand requests measure interpreted
+  # bytecode, a cold connection pool and an empty JIT profile.
   - name: warmup
     mode: closed-loop
     warmup: true

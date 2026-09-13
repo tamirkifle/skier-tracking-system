@@ -3,7 +3,7 @@
 # The question is not throughput. It is what N independent controllers do to *aggregate* admission
 # when they all steer against one shared queue, specifically the floor branch, which
 # `ControllerFleetTest` measured as scaling by exactly N in a JVM-level simulation and which nothing
-# had ever run live (L7 stage 1, defect #33).
+# had ever run live.
 #
 # Open-loop rather than closed-loop, and that is the load-shape decision this scenario exists to
 # make. A closed-loop generator slows down when the server sheds, so offered load silently tracks
