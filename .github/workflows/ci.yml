@@ -1,0 +1,282 @@
+name: CI
+
+# Gates chosen for what this project can actually get wrong, in the order those
+# things cost the most:
+#   1. secrets, because a leaked key is the one mistake a later commit cannot undo
+#   2. build + unit tests
+#   3. integration tests against real RabbitMQ and DynamoDB
+#   4. coverage floor
+#   5. dependency CVEs and image build
+#
+# Secret scanning runs first and independently, so a leaked key fails the run even
+# if the build is broken for an unrelated reason.
+#
+# `make ci-local` runs these same jobs, in this order, with these commands. Keep the
+# two in sync: a gate that only exists here cannot be self-verified before a push,
+# which makes the push the test. scripts/ci-local.sh documents every deviation that
+# remains, including the one that cannot be closed (this runner is amd64).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MAVEN_ARGS: -B -ntp
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, not just the tip: a fix-forward commit does not clear a
+          # credential introduced by an earlier one.
+          fetch-depth: 0
+
+      # gitleaks-action derives its scan range from the push event's own `commits`
+      # array (baseRef = first listed commit, headRef = last), not from a real
+      # diff of the ref before/after the push, and GitHub caps that array at 20
+      # entries. This repo's `main` was seeded in a single 55-commit push, so the
+      # action's first-ever run scanned only the most recent 20 commits and missed
+      # every one of the seven that carry real (expired) credentials. Confirmed
+      # from that run's own log: `gitleaks cmd: ... a74858237^..09c3b5bcb2`, the
+      # commit that documents the leak, not the commits that contain it. Calling
+      # the CLI directly, exactly as `make secrets-scan` / ci-local.sh do, is the
+      # only way to make this job scan what its own comment above claims.
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
+            | tar xz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+
+      - name: gitleaks (full history)
+        run: gitleaks detect --no-banner --redact
+
+  build:
+    name: Build and unit test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Verify formatting
+        # Fails rather than reformats: a CI job that rewrites your code produces
+        # diffs nobody reviewed.
+        run: mvn $MAVEN_ARGS spotless:check
+
+      - name: Unit tests
+        run: mvn $MAVEN_ARGS test
+
+      - name: Publish test report
+        uses: mikepenz/action-junit-report@v4
+        if: always()
+        with:
+          report_paths: '**/target/surefire-reports/TEST-*.xml'
+          detailed_summary: true
+
+  integration:
+    name: Integration test (real RabbitMQ + DynamoDB)
+    runs-on: ubuntu-latest
+    # Containers make this the slowest job; there is no point starting them if
+    # the code does not compile.
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Pre-pull container images
+        # Explicit rather than letting Testcontainers pull inline: a registry
+        # timeout then fails as "could not pull image" instead of as an opaque
+        # 30-second test timeout.
+        run: |
+          docker pull localstack/localstack:3.8
+          docker pull rabbitmq:3.13-management-alpine
+
+      - name: Integration tests
+        run: mvn $MAVEN_ARGS -Pintegration verify -DskipITs=false
+
+      - name: Publish test report
+        uses: mikepenz/action-junit-report@v4
+        if: always()
+        with:
+          report_paths: '**/target/surefire-reports/TEST-*.xml'
+          detailed_summary: true
+
+  coverage:
+    name: Coverage floor
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Enforce the coverage floor
+        run: mvn $MAVEN_ARGS -Pcoverage-gate verify
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jacoco-reports
+          path: '**/target/site/jacoco/'
+          retention-days: 7
+
+  dependencies:
+    name: Dependency vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Resolve the dependency tree
+        run: mvn $MAVEN_ARGS dependency:tree -DoutputFile=deps.txt
+
+      # Blocking, unlike the Trivy step below, because this one names a CVE class the project can
+      # actually fix: an SDK that stopped receiving patches in December 2025. Needs the step above
+      # to have run, it reads the trees to catch a transitive reintroduction. Same script
+      # scripts/ci-local.sh runs, so a green run here is reproducible locally.
+      - name: AWS SDK v1 stays retired
+        run: bash scripts/check-no-sdk-v1.sh
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@v0.24.0
+        with:
+          scan-type: fs
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          # Advisory, not blocking. A transitive CVE in a study project is worth
+          # seeing on every run, but failing the build on a third-party
+          # disclosure the project cannot fix teaches people to ignore red CI.
+          exit-code: '0'
+          format: table
+
+  images:
+    name: Container images
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: server
+            dockerfile: Server/SkierServer/Dockerfile
+          - name: consumer
+            dockerfile: Consumer/SkierConsumer/Dockerfile
+          - name: schema
+            dockerfile: Infra/SchemaTool/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.name }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: true
+          tags: skiers-${{ matrix.name }}:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@v0.24.0
+        with:
+          image-ref: skiers-${{ matrix.name }}:ci
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          format: table
+
+  rules:
+    name: Alert rule tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: promtool test rules
+        # The Prometheus rule tests, not the Java test suite. Fifteen alert rules exist and
+        # nothing else in CI evaluates any of them; two were already found wrong by hand (an
+        # unsatisfiable histogram_quantile, a rule duplicating a constant the code owns). Same
+        # image and same command as scripts/ci-local.sh, so a green run here is reproducible
+        # locally without installing promtool.
+        run: |
+          docker run --rm -v "$PWD:/w" --entrypoint promtool prom/prometheus:v2.54.1 \
+            test rules /w/Infra/observability/alerts.test.yml
+
+  smoke:
+    name: End-to-end smoke test
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Start the stack
+        run: docker compose up -d --build
+
+      - name: Wait for readiness
+        run: make wait
+
+      - name: Smoke test
+        # Proves the whole pipeline works, not just that the containers started.
+        run: make smoke
+
+      - name: Benchmark harness check
+        # A 2,000-request run: confirms the harness itself still functions and
+        # that the pipeline sustains a small load without failures.
+        run: |
+          mvn $MAVEN_ARGS -q -pl Client/SkierClient -am package -DskipTests
+          java -jar Client/SkierClient/target/skier-client.jar run \
+            --scenario benchmarks/scenarios/smoke.yaml \
+            --base-url http://localhost:8080 \
+            --out benchmarks/out \
+            --fail-under-success-rate 0.99
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-report
+          path: benchmarks/out/
+          retention-days: 7
+
+      - name: Service logs on failure
+        if: failure()
+        run: docker compose logs --tail=200 server consumer
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
