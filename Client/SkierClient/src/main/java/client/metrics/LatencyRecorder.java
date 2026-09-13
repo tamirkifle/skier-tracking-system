@@ -27,6 +27,12 @@ public final class LatencyRecorder {
   private final LongAdder retries = new LongAdder();
   private final ConcurrentHashMap<Integer, LongAdder> byStatus = new ConcurrentHashMap<>();
 
+  // Counter values at the previous snapshot, so an interval is derived by subtraction.
+  private long baselineSuccesses;
+  private long baselineFailures;
+  private long baselineRetries;
+  private Map<Integer, Long> baselineStatuses = Map.of();
+
   private final AtomicLong firstRecordedAtNanos = new AtomicLong(Long.MAX_VALUE);
   private final AtomicLong lastRecordedAtNanos = new AtomicLong(Long.MIN_VALUE);
 
@@ -46,6 +52,37 @@ public final class LatencyRecorder {
 
   public void recordRetry() {
     retries.increment();
+  }
+
+  /**
+   * Each call drains the recorder, so two consecutive snapshots never overlap. The drain and the
+   * counter reads are not atomic, so a request completing between them lands in this interval's
+   * counters and the next interval's histogram.
+   */
+  public synchronized Interval snapshot(String name) {
+    Histogram histogram = recorder.getIntervalHistogram();
+    cumulative.add(histogram);
+
+    long successNow = successes.sum();
+    long failureNow = failures.sum();
+    long retryNow = retries.sum();
+    Map<Integer, Long> statusNow = currentStatusCounts();
+
+    Interval interval =
+        new Interval(
+            name,
+            histogram,
+            successNow - baselineSuccesses,
+            failureNow - baselineFailures,
+            retryNow - baselineRetries,
+            difference(statusNow, baselineStatuses));
+
+    baselineSuccesses = successNow;
+    baselineFailures = failureNow;
+    baselineRetries = retryNow;
+    baselineStatuses = statusNow;
+
+    return interval;
   }
 
   public synchronized Histogram cumulativeHistogram() {
@@ -77,6 +114,31 @@ public final class LatencyRecorder {
     Map<Integer, Long> counts = new TreeMap<>();
     byStatus.forEach((status, count) -> counts.put(status, count.sum()));
     return counts;
+  }
+
+  private static Map<Integer, Long> difference(Map<Integer, Long> now, Map<Integer, Long> before) {
+    Map<Integer, Long> delta = new TreeMap<>();
+    now.forEach(
+        (status, count) -> {
+          long change = count - before.getOrDefault(status, 0L);
+          if (change > 0) {
+            delta.put(status, change);
+          }
+        });
+    return delta;
+  }
+
+  public record Interval(
+      String name,
+      Histogram latency,
+      long successes,
+      long failures,
+      long retries,
+      Map<Integer, Long> statusCounts) {
+
+    public long completed() {
+      return successes + failures;
+    }
   }
 
   public double observedWindowSeconds() {
