@@ -1,6 +1,9 @@
 package skiers.service;
 
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -47,6 +50,28 @@ public class SkierService {
         resortID, seasonID, dayID, skierID, fetchDayVertical(resortID, seasonID, dayID, skierID));
   }
 
+  @Cacheable(
+      value = "skierResortTotals",
+      key = "{#skierID, #resort, #season}",
+      unless = "#result == null || #result['resorts'].isEmpty()")
+  @CircuitBreaker(name = CIRCUIT)
+  public Map<String, Object> getSkierResortTotals(String skierID, String resort, String season) {
+    Map<String, Integer> seasonTotals = fetchSkierResortTotals(skierID, resort, season);
+
+    List<Map<String, Object>> resorts = new ArrayList<>(seasonTotals.size());
+    seasonTotals.forEach(
+        (seasonId, total) -> {
+          Map<String, Object> entry = new LinkedHashMap<>(2);
+          entry.put("seasonID", seasonId);
+          entry.put("totalVert", total);
+          resorts.add(entry);
+        });
+
+    Map<String, Object> response = new LinkedHashMap<>(1);
+    response.put("resorts", resorts);
+    return response;
+  }
+
   private int fetchDayVertical(String resortID, String seasonID, String dayID, String skierID) {
     QueryRequest request =
         QueryRequest.builder()
@@ -63,6 +88,54 @@ public class SkierService {
             .build();
 
     return sumVertical(request);
+  }
+
+  private Map<String, Integer> fetchSkierResortTotals(
+      String skierID, String resort, String season) {
+    Map<String, String> names = new HashMap<>(2);
+    names.put("#pk", Constants.ATTR_RESORT_SKIER);
+
+    Map<String, AttributeValue> values = new HashMap<>(2);
+    values.put(":pk", AttributeValue.fromS(resort + '#' + skierID));
+
+    String condition = "#pk = :pk";
+    if (season != null && !season.isBlank()) {
+      names.put("#sk", Constants.ATTR_SEASON_DAY);
+      values.put(":seasonPrefix", AttributeValue.fromS(season + '#'));
+      condition += " AND begins_with(#sk, :seasonPrefix)";
+    }
+
+    QueryRequest request =
+        QueryRequest.builder()
+            .tableName(Constants.TARGET_TABLE_NAME)
+            .indexName(Constants.CS_INDEX)
+            .keyConditionExpression(condition)
+            .expressionAttributeNames(names)
+            .expressionAttributeValues(values)
+            .build();
+
+    Map<String, Integer> totals = new LinkedHashMap<>();
+    forEachPage(request, items -> accumulateBySeason(items, totals, season));
+    return totals;
+  }
+
+  private void accumulateBySeason(
+      List<Map<String, AttributeValue>> items,
+      Map<String, Integer> totals,
+      String requestedSeason) {
+    for (Map<String, AttributeValue> item : items) {
+      AttributeValue vertical = item.get(Constants.ATTR_VERTICAL);
+      if (vertical == null) {
+        continue;
+      }
+      AttributeValue sortKey = item.get(Constants.ATTR_SEASON_DAY);
+      String seasonId =
+          sortKey != null && sortKey.s() != null ? sortKey.s().split("#", 2)[0] : requestedSeason;
+      if (seasonId == null) {
+        continue;
+      }
+      totals.merge(seasonId, readInt(vertical), Integer::sum);
+    }
   }
 
   private int sumVertical(QueryRequest request) {
