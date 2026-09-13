@@ -1,6 +1,7 @@
 package skiers.ingest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -8,6 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.AmqpConnectException;
 import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.core.MessagePostProcessor;
 import org.springframework.amqp.core.ReturnedMessage;
 import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
@@ -136,5 +138,46 @@ class LiftRidePublisherTest {
 
     assertThat(publisher(template, 50).publish("evt-5", BODY, 1_700_000_000_000L))
         .isEqualTo(PublishOutcome.UNKNOWN);
+  }
+
+  @Test
+  @DisplayName("the envelope carries the event id, the publish time and persistent delivery")
+  void stampsTheEnvelope() {
+    StubTemplate template = new StubTemplate();
+    template.confirms();
+
+    publisher(template, 1000).publish("evt-6", BODY, 1_700_000_000_123L);
+
+    Message message = template.envelope.get().postProcessMessage(new Message(new byte[0]));
+    // MessageProperties.getHeader is declared <T> T, so assertThat needs a typed local.
+    String eventId = message.getMessageProperties().getHeader(Constants.HEADER_EVENT_ID);
+    Long publishedAt = message.getMessageProperties().getHeader(Constants.HEADER_PUBLISHED_AT);
+    assertThat(eventId).isEqualTo("evt-6");
+    assertThat(publishedAt).isEqualTo(1_700_000_000_123L);
+    assertThat(message.getMessageProperties().getDeliveryMode())
+        .isEqualTo(MessageDeliveryMode.PERSISTENT);
+  }
+
+  @Test
+  @DisplayName("a connection factory without correlated confirms refuses to start the publisher")
+  void refusesToStartWithoutConfirms() {
+    CachingConnectionFactory noConfirms = new CachingConnectionFactory();
+
+    assertThatThrownBy(
+            () -> new LiftRidePublisher(new StubTemplate(), noConfirms, new SkierProperties()))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("publisher-confirm-type");
+  }
+
+  @Test
+  @DisplayName("a connection factory without returns refuses to start the publisher")
+  void refusesToStartWithoutReturns() {
+    CachingConnectionFactory noReturns = new CachingConnectionFactory();
+    noReturns.setPublisherConfirmType(CachingConnectionFactory.ConfirmType.CORRELATED);
+
+    assertThatThrownBy(
+            () -> new LiftRidePublisher(new StubTemplate(), noReturns, new SkierProperties()))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("publisher-returns");
   }
 }
