@@ -158,6 +158,13 @@ ab-reverse: ## Re-run an A/B ($(AB_AXIS)) with the arms in the opposite order
 	$(MVN) -B -q -pl Client/SkierClient -am package -DskipTests
 	AB_REVERSE=1 bash scripts/ab.sh $(AB_AXIS) $(AB_EVENTS)
 
+# Not folded into `make it`: it needs a running Compose stack, kills a container, and takes a couple
+# of minutes. It is the check that the delivery claims survive a process death, which no test in the
+# suite covers, a Testcontainers consumer cannot be SIGKILLed out from under its own JVM.
+.PHONY: recovery
+recovery: ## Kill the consumer mid-drain and reconcile every published event against DynamoDB
+	@bash scripts/recovery.sh
+
 .PHONY: bench-smoke
 bench-smoke: ## A 2,000-request benchmark, for checking the harness works
 	$(MVN) -B -q -pl Client/SkierClient -am package -DskipTests
