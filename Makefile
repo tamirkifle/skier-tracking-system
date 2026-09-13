@@ -191,6 +191,10 @@ fleet: ## Overload N server replicas with the controller live (FLEET_N=2)
 recovery: ## Kill the consumer mid-drain and reconcile every published event against DynamoDB
 	@bash scripts/recovery.sh
 
+.PHONY: redis-outage
+redis-outage: ## Take Redis away from a live N-replica fleet and record what the floor does (FLEET_N=2)
+	bash scripts/fleet-redis-outage.sh $(FLEET_N)
+
 .PHONY: fleet-down
 fleet-down: ## Stop the replicated stack and return to a single server on port 8080
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.scale.yml down --remove-orphans
