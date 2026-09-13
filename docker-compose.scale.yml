@@ -1,0 +1,40 @@
+# Overlay that makes the server replicable:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale server=2
+#
+# `scripts/fleet.sh` is what drives this; the file is separate rather than folded into
+# docker-compose.yml because `make up` must keep giving you a server on a known port 8080, and an
+# ephemeral port would break `make wait`, `make smoke`, `scripts/ab.sh` and every documented curl.
+#
+# Two things in the base file forbid `--scale server=N`, and Docker refuses the run outright rather
+# than degrading:
+#
+#   container_name: skiers-server   a name is unique per daemon, so replica 2 cannot be created
+#   ports: "8080:8080"              a published host port is unique per host, same
+#
+# Both are removed here. `!reset` and `!override` are Compose merge tags, without them a scalar is
+# replaced (there is no scalar meaning "no container name") and a sequence is *appended*, so
+# "8080:8080" would survive alongside the ephemeral mapping and the run would fail identically.
+#
+# There is deliberately no load balancer. Adding one would put a component in front of the thing
+# being measured and change the arrival process; instead the client is given every replica's URL and
+# round-robins across them (`--base-url a,b`), which keeps the request path identical to a
+# single-server run. That is also why the ports are published rather than internal: the load
+# generator runs on the host.
+
+services:
+  server:
+    container_name: !reset null
+    ports: !override
+      # Ephemeral host port per replica. `docker compose port --index N server 8080` reports what
+      # each one got; scripts/fleet.sh reads them from there rather than guessing a range.
+      - "8080"
+
+  prometheus:
+    volumes: !override
+      # Compose's DNS returns one A record per replica for the service alias, so a static target of
+      # "server:8080" resolves to *one arbitrary replica per scrape*, the series would silently
+      # alternate between instances and every per-instance panel would be a lie. This config
+      # discovers them instead. Same file otherwise; see its own header.
+      - ./Infra/observability/prometheus-scale.yml:/etc/prometheus/prometheus.yml:ro
+      - ./Infra/observability/alerts.yml:/etc/prometheus/alerts.yml:ro

@@ -1,0 +1,48 @@
+# Prometheus configuration for a replicated server, mounted only by docker-compose.scale.yml.
+#
+# The difference from prometheus.yml is one job. `static_configs: ["server:8080"]` is resolved once
+# per scrape by Compose's embedded DNS, which returns an A record per replica and rotates them, so
+# a two-replica stack scraped statically produces a single `instance="server:8080"` series whose
+# value jumps between two unrelated controllers. Nothing about that looks broken on a graph, which
+# is what makes it worth a separate file rather than a comment.
+#
+# `dns_sd_configs` asks for every A record instead and yields one target per replica, so
+# `skier_admission_rate` becomes N series and `sum(...)` over them is the fleet's aggregate, which
+# is the quantity fleet admission control is about.
+#
+# Kept as a copy rather than generated: two nearly-identical files that can be diffed beat a
+# templating step in a repository whose whole argument is that configuration should be readable.
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+  external_labels:
+    system: skier-tracking
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: skier-server
+    metrics_path: /actuator/prometheus
+    dns_sd_configs:
+      - names: ["server"]
+        type: A
+        port: 8080
+        refresh_interval: 10s
+    relabel_configs:
+      # dns_sd carries no static labels, so `service` is set here to keep the label set identical to
+      # the single-server config's, the dashboards and alert rules select on it.
+      - target_label: service
+        replacement: server
+
+  - job_name: skier-consumer
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["consumer:8085"]
+        labels:
+          service: consumer
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
