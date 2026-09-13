@@ -119,6 +119,68 @@ class SkierDataProcessorTest {
   }
 
   @Test
+  @DisplayName("cardinality is updated exactly once per durable event")
+  void updatesCardinalityAfterWrite() {
+    build(1, 1, 0, 100, 3);
+    RecordingAck ack = new RecordingAck();
+    processor.submit(event(42, 100, ack));
+
+    await().atMost(Duration.ofSeconds(5)).until(() -> ack.acks() == 1);
+    assertThat(counter.observations.get()).isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName("an optional cardinality failure does not replay a durable event")
+  void optionalCardinalityFailureDoesNotReplayADurableEvent() {
+    build(1, 1, 0, 100, 3);
+    counter.required = false;
+    counter.failure = new IllegalStateException("redis down");
+
+    RecordingAck ack = new RecordingAck();
+    processor.submit(event(42, 100, ack));
+
+    await().atMost(Duration.ofSeconds(5)).until(() -> ack.acks() == 1);
+    assertThat(ack.requeues()).isZero();
+    assertThat(ack.delayedRetries()).isZero();
+  }
+
+  @Test
+  @DisplayName("a required cardinality failure retries the event instead of acknowledging it")
+  void requiredCardinalityFailureIsNotSettled() {
+    build(1, 1, 0, 100, 3);
+    counter.required = true;
+    counter.failure = new IllegalStateException("transaction cancelled");
+
+    RecordingAck ack = new RecordingAck();
+    processor.submit(event(42, 100, ack));
+
+    await().atMost(Duration.ofSeconds(5)).until(() -> ack.delayedRetries() == 1);
+    assertThat(ack.acks()).isZero();
+    assertThat(registry.get("skier.cardinality.projection.unresolved").counter().count())
+        .isEqualTo(1.0);
+  }
+
+  @Test
+  @DisplayName("a required projection that keeps failing is quarantined with the ride stored")
+  void requiredCardinalityFailureIsEventuallyQuarantined() {
+    build(1, 1, 0, 100, 1);
+    counter.required = true;
+    counter.failure = new IllegalStateException("transaction cancelled");
+
+    int attempts = 0;
+    for (int delivery = 1; delivery <= 2; delivery++) {
+      RecordingAck ack = new RecordingAck();
+      processor.submit(event(42, 100, ack, attempts));
+      if (delivery == 1) {
+        await().atMost(Duration.ofSeconds(5)).until(() -> ack.delayedRetries() == 1);
+        attempts = ack.lastAttempt();
+      } else {
+        await().atMost(Duration.ofSeconds(5)).until(() -> ack.deadLetters() == 1);
+      }
+    }
+  }
+
+  @Test
   @DisplayName("a whole-request failure sends every event in the group to the delay route")
   void retriesOnWriteFailure() {
     build(1, 1, 0, 100, 3);
