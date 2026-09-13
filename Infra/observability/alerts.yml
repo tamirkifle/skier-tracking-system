@@ -1,0 +1,294 @@
+# Alert rules for the service level objectives.
+#
+# The design principle here is that every rule fires on a symptom a user could feel, or on a
+# leading indicator of one, not on a resource number. "CPU is high" is not an alert; "the write
+# pipeline is losing events" is. Each rule states what it means and what to do, because an alert
+# whose runbook is "ask whoever wrote it" is not an alert.
+
+groups:
+  # -------------------------------------------------------------------------------------------
+  # SLO burn-rate alerts.
+  #
+  # Two windows per objective, which is the standard multi-window burn-rate pattern: a fast one
+  # that catches an outage in minutes, and a slow one that catches a persistent low-grade error
+  # rate the fast window would never trigger on. Single-threshold alerting cannot do both, a
+  # threshold tight enough to catch slow burn pages constantly on noise.
+  # -------------------------------------------------------------------------------------------
+  - name: slo-availability
+    rules:
+      - alert: IngestErrorBudgetBurningFast
+        # 14.4x burn over 1h exhausts a 30-day budget in ~2 days. Page.
+        expr: |
+          (
+            sum(rate(http_server_requests_seconds_count{service="server",status=~"5.."}[1h]))
+            /
+            sum(rate(http_server_requests_seconds_count{service="server"}[1h]))
+          ) > (14.4 * 0.001)
+        for: 2m
+        labels:
+          severity: page
+          slo: ingest-availability
+        annotations:
+          summary: "Ingest 5xx rate is burning the error budget 14x too fast"
+          description: >
+            More than 1.44% of ingest requests are failing. At this rate the 99.9% monthly
+            objective is exhausted in about two days. Check /actuator/health on the server for
+            broker and DynamoDB reachability, then the DLQ depth.
+
+      - alert: IngestErrorBudgetBurningSlow
+        # 6x burn over 6h. Ticket, not a page: real but not urgent.
+        expr: |
+          (
+            sum(rate(http_server_requests_seconds_count{service="server",status=~"5.."}[6h]))
+            /
+            sum(rate(http_server_requests_seconds_count{service="server"}[6h]))
+          ) > (6 * 0.001)
+        for: 15m
+        labels:
+          severity: ticket
+          slo: ingest-availability
+        annotations:
+          summary: "Ingest 5xx rate is persistently above the error budget"
+
+  - name: slo-latency
+    rules:
+      - alert: IngestLatencyObjectiveAtRisk
+        # p99 over the 100ms objective. Uses the histogram, so this is a real quantile rather
+        # than an average that hides the tail the objective is actually about.
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le) (rate(http_server_requests_seconds_bucket{service="server",uri=~".*skier.*"}[5m]))
+          ) > 0.1
+        for: 10m
+        labels:
+          severity: ticket
+          slo: ingest-latency
+        annotations:
+          summary: "Ingest p99 latency is above the 100ms objective"
+          description: >
+            Check skier_ingest_admission_wait_seconds first: if requests are queueing for permits, the
+            constraint is downstream and the admission controller is doing its job. If admission
+            wait is flat, the latency is in the publish path.
+
+  # -------------------------------------------------------------------------------------------
+  # Objective 5, pipeline freshness: accepted to queryable.
+  #
+  # The last two rules alert on the measurement rather than on the system, which is unusual and
+  # deliberate. skier_pipeline_freshness is a subtraction across two hosts' wall clocks, so it has
+  # two ways of being quietly wrong, no publish timestamp to subtract from, and a subtraction that
+  # comes out negative. Both are excluded from the histogram at the source, so without these rules
+  # the first rule's quantile stays healthy by measuring less and less traffic. An SLO whose own
+  # instrument can fail silently is not an SLO.
+  # -------------------------------------------------------------------------------------------
+  - name: slo-freshness
+    rules:
+      - alert: PipelineFreshnessObjectiveAtRisk
+        # Objective 5 is "p99 under 30s", asked as the ratio it actually is: what share of events
+        # landed in the le="30.0" bucket. Not histogram_quantile, the timer carries one SLO
+        # boundary, and against a two-bucket histogram (le=30, le=+Inf) histogram_quantile can
+        # never return more than 30, so `> 30` would be a rule that cannot fire no matter how
+        # stale the pipeline got. The ratio needs no interpolation and aggregates correctly across
+        # consumer instances.
+        #
+        # Note the deliberate absence of the clamp_min that SustainedLoadShedding uses. That guard
+        # is correct for a `>` rule, where an idle 0/0.001 evaluates to 0 and stays quiet. Here the
+        # comparison is `<`, so the same guard would make every idle period page. The explicit
+        # traffic guard below is what keeps a pipeline with nothing in it from looking stale.
+        expr: |
+          (
+            sum(rate(skier_pipeline_freshness_seconds_bucket{le="30.0"}[10m]))
+            /
+            sum(rate(skier_pipeline_freshness_seconds_count[10m]))
+          ) < 0.99
+          and
+          sum(rate(skier_pipeline_freshness_seconds_count[10m])) > 0
+        for: 10m
+        labels:
+          severity: ticket
+          slo: pipeline-freshness
+        annotations:
+          summary: "Accepted events are taking over 30s to become queryable"
+          description: >
+            Compare against skier_write_latency_seconds, which starts at dequeue. If write latency
+            is flat while freshness is climbing, the time is being spent in the broker and the
+            consumer is under-provisioned rather than slow. Check queue depth and consumer count.
+
+      - alert: PipelineFreshnessUnmeasured
+        # Durable events arriving without an x-published-at header. Every one is a hole in the
+        # objective above, not a pipeline fault.
+        expr: sum(rate(skier_pipeline_freshness_unstamped_total[15m])) > 0
+        for: 15m
+        labels:
+          severity: ticket
+          slo: pipeline-freshness
+        annotations:
+          summary: "Events are becoming durable with no publish timestamp to measure from"
+          description: >
+            The producer is not stamping x-published-at, so these events contribute nothing to the
+            freshness histogram. Expected briefly during a rolling server deploy; sustained means
+            objective 5 is reporting on a subset of traffic. Check the server version.
+
+      - alert: PipelineClockSkewDetected
+        # A negative freshness is impossible on one clock, so it measures the two hosts' offset.
+        expr: sum(rate(skier_pipeline_freshness_skewed_total[15m])) > 0
+        for: 15m
+        labels:
+          severity: ticket
+          slo: pipeline-freshness
+        annotations:
+          summary: "Server and consumer clocks disagree; freshness samples are being discarded"
+          description: >
+            Events appear to become durable before they were published. The freshness figure is
+            offset by however far apart the two clocks are, in whichever direction, a skew large
+            enough to show here is large enough to distort the samples that were not discarded.
+            Check NTP on both hosts before trusting objective 5.
+
+  # -------------------------------------------------------------------------------------------
+  # Pipeline correctness. These are the ones that matter most: the system can be fast, healthy
+  # and returning 200s while quietly dropping events.
+  # -------------------------------------------------------------------------------------------
+  - name: pipeline-integrity
+    rules:
+      - alert: EventsBeingDeadLettered
+        # Any sustained dead-lettering is data loss. There is no acceptable background rate.
+        expr: sum(rate(skier_write_dropped_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: page
+          category: data-loss
+        annotations:
+          summary: "Events are being dead-lettered after exhausting their retry budget"
+          description: >
+            Each one is a lift ride that will not appear in any query. Inspect the DLQ
+            (rabbitmq:15672, queue deadLetterQueue) to see whether these are poison messages or
+            a persistent DynamoDB failure.
+
+      - alert: WriteQueueBackingUp
+        # Staging depth is the consumer's own backlog, distinct from the broker's.
+        expr: max(skier_write_staging_depth) > 25000
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Consumer write queue is over half its capacity"
+          description: >
+            The consumer is accepting from the broker faster than DynamoDB is absorbing. Once the
+            queue fills, events are returned to the broker, recoverable, but the broker then grows
+            instead. Check DynamoDB throttling and skier_write_retries_total.
+
+      - alert: EventsReturnedToBroker
+        expr: sum(rate(skier_write_requeued_total[5m])) > 10
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Consumer is pushing back on the broker"
+          description: >
+            The write queue is full and events are being nacked with requeue. Not loss, but the
+            pipeline is saturated and the broker is now the buffer.
+
+      - alert: QueueDepthUnobservable
+        # -1 is the sentinel for "the controller could not sample the broker". Left unnoticed,
+        # admission control silently freezes at whatever rate it last held.
+        expr: max(skier_queue_depth) == -1
+        for: 3m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Admission controller cannot read queue depth"
+          description: >
+            The control loop is holding its last rate because the broker is unreachable for
+            management queries. Admission control is effectively open-loop until this clears.
+
+  # -------------------------------------------------------------------------------------------
+  # Saturation and dependencies.
+  # -------------------------------------------------------------------------------------------
+  - name: saturation
+    rules:
+      - alert: AdmissionControlPinnedAtFloor
+        # Distinct from ordinary shedding: at the floor, the controller has no room left to back
+        # off, so the constraint is downstream and will not resolve itself.
+        #
+        # The counter carries the comparison the server itself made, so there is no threshold
+        # here to drift out of step with the code.
+        #
+        # Counting ticks rather than comparing the two gauges is deliberate. The controller
+        # increments this only while it is *already at* the floor and the backlog still calls for a
+        # decrease, so the ordinary retreat-and-recover cycle contributes a bounded burst and then
+        # stops; a rate over 10m that is still non-zero is the state that does not resolve itself.
+        expr: sum(rate(skier_admission_floor_pinned_total[10m])) > 0
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "Admission control has bottomed out at its floor rate"
+          description: >
+            The server is shedding everything it is permitted to and the queue-depth controller
+            cannot reduce further, so the backlog grows regardless. The bottleneck is the consumer
+            or DynamoDB, not the API. If skier_admission_rate_floor exceeds what the pipeline
+            drains, no setpoint formulation fixes this, lower skier.admission.min-rate.
+
+      - alert: FleetSizeStale
+        # The admission floor and the controller's two additive steps are divided by the instance
+        # count each server reads from Redis. A refresh that keeps failing does not break anything
+        # immediately, the last known size is held on purpose, because falling back to 1 would restore
+        # N times the configured admission across the whole fleet, but the held value stops tracking
+        # scale changes, and nothing else in the system would say so.
+        #
+        # Alerting on the staleness gauge rather than on the failure counter: a handful of failed
+        # refreshes is a blip the next heartbeat corrects, and what matters is how long an instance
+        # has been steering on a number it can no longer confirm. 120s is 60 missed heartbeats at
+        # the shipped 2s interval.
+        expr: max(skier_fleet_registry_staleness_seconds) > 120
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "A server's fleet-size view has not refreshed for over two minutes"
+          description: >
+            One or more servers cannot reach Redis to count their peers and are holding the last
+            size they saw. Admission stays conservative rather than opening up, but a scale-up or
+            scale-down since then is not reflected in the per-instance floor or step sizes.
+
+      - alert: SustainedLoadShedding
+        expr: |
+          (
+            sum(rate(skier_ingest_shed_total[10m]))
+            /
+            clamp_min(sum(rate(skier_ingest_accepted_total[10m])) + sum(rate(skier_ingest_shed_total[10m])), 0.001)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Over 5% of ingest requests are being shed"
+
+      - alert: DynamoDbCircuitOpen
+        expr: resilience4j_circuitbreaker_state{name="dynamodb",state="open"} == 1
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: "DynamoDB circuit breaker is open"
+          description: >
+            Reads are failing fast and serving only from cache. Writes are unaffected by this
+            breaker. Check DynamoDB capacity and credentials.
+
+      - alert: CacheUnavailable
+        # A cache failure is meant to degrade, not to page, but a persistent one means every read
+        # is hitting DynamoDB, which is a cost and latency problem worth a ticket.
+        expr: sum(rate(skier_cache_errors_total[10m])) > 1
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Read cache is being bypassed due to errors"
+
+      - alert: ServiceDown
+        expr: up{job=~"skier-.*"} == 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: "{{ $labels.job }} is not responding to scrapes"
