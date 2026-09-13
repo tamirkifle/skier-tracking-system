@@ -4,6 +4,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import java.time.Duration;
 import org.springframework.stereotype.Component;
 
 /** Consumer-side instrumentation, exported over {@code /actuator/prometheus}. */
@@ -20,7 +21,10 @@ public class ConsumerMetrics {
   private final Counter uniqueSkiersObserved;
   private final Counter cardinalityWriteRequests;
   private final Counter cardinalityWriteItems;
+  private final Counter freshnessUnstamped;
+  private final Counter freshnessSkewed;
   private final Timer writeLatency;
+  private final Timer freshness;
   private final DistributionSummary batchSize;
 
   public ConsumerMetrics(MeterRegistry registry) {
@@ -73,6 +77,20 @@ public class ConsumerMetrics {
             .description("Time from dequeue to durable write, per flush")
             .publishPercentiles(0.5, 0.95, 0.99)
             .register(registry);
+    this.freshness =
+        Timer.builder("skier.pipeline.freshness")
+            .description("Time from the producer's publish to the event being durable in DynamoDB")
+            .serviceLevelObjectives(Duration.ofSeconds(30))
+            .register(registry);
+    this.freshnessUnstamped =
+        Counter.builder("skier.pipeline.freshness.unstamped")
+            .description("Durable events whose delivery carried no publish timestamp")
+            .register(registry);
+    this.freshnessSkewed =
+        Counter.builder("skier.pipeline.freshness.skewed")
+            .description(
+                "Durable events that appeared to become durable before they were published")
+            .register(registry);
     this.batchSize =
         DistributionSummary.builder("skier.write.batch.size")
             .description("Items per DynamoDB write request")
@@ -83,6 +101,20 @@ public class ConsumerMetrics {
     written.increment(items);
     batchSize.record(items);
     writeLatency.record(nanos, java.util.concurrent.TimeUnit.NANOSECONDS);
+  }
+
+  /** The stamps come from different hosts, so impossible cases are counted, not clamped. */
+  public void recordFreshness(Long publishedAtMillis, long observedAtMillis) {
+    if (publishedAtMillis == null) {
+      freshnessUnstamped.increment();
+      return;
+    }
+    long elapsed = observedAtMillis - publishedAtMillis;
+    if (elapsed < 0) {
+      freshnessSkewed.increment();
+      return;
+    }
+    freshness.record(elapsed, java.util.concurrent.TimeUnit.MILLISECONDS);
   }
 
   public void recordRetry() {
