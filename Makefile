@@ -63,6 +63,10 @@ it-reuse-stop: ## Remove the containers `make it-reuse` left running
 verify: ## Unit tests + coverage gate + integration tests
 	$(MVN) -B -Pintegration,coverage-gate verify
 
+.PHONY: ci-local
+ci-local: ## Run every gate CI runs, in CI's order (the definition of done)
+	@bash scripts/ci-local.sh
+
 .PHONY: coverage
 coverage: ## Produce JaCoCo HTML reports
 	$(MVN) -B verify -Pcoverage-gate
