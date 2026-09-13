@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -14,11 +15,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import skiers.Constants;
 import skiers.config.SkierProperties;
@@ -27,6 +30,7 @@ import skiers.ingest.PublishOutcome;
 import skiers.metrics.IngestMetrics;
 import skiers.model.LiftRide;
 import skiers.service.RateLimiter;
+import skiers.service.SkierService;
 
 /** Write path: accepts lift-ride events and hands them to the broker. */
 @RestController
@@ -38,6 +42,7 @@ public class SkierController {
 
   private final LiftRidePublisher publisher;
   private final RateLimiter rateLimiter;
+  private final SkierService skierService;
   private final IngestMetrics metrics;
   private final SkierProperties.Admission admissionConfig;
   private final SkierProperties.Ingest ingestConfig;
@@ -45,10 +50,12 @@ public class SkierController {
   public SkierController(
       LiftRidePublisher publisher,
       RateLimiter rateLimiter,
+      SkierService skierService,
       IngestMetrics metrics,
       SkierProperties properties) {
     this.publisher = publisher;
     this.rateLimiter = rateLimiter;
+    this.skierService = skierService;
     this.metrics = metrics;
     this.admissionConfig = properties.getAdmission();
     this.ingestConfig = properties.getIngest();
@@ -196,6 +203,30 @@ public class SkierController {
         || c == ':';
   }
 
+  @GetMapping("/{skierID}/vertical")
+  @Operation(
+      summary = "Total vertical for a skier at a resort",
+      description = "Served from cache when warm; falls back to a CS-Index query.")
+  public ResponseEntity<?> getSkierResortTotals(
+      @PathVariable String skierID,
+      @RequestParam String resort,
+      @RequestParam(required = false) String season) {
+
+    if (!isValidSkierResort(skierID, resort)) {
+      metrics.recordInvalid();
+      return ResponseEntity.badRequest()
+          .body(ApiError.of("Invalid input parameters", "skierID/resort"));
+    }
+
+    Map<String, Object> response = skierService.getSkierResortTotals(skierID, resort, season);
+    List<?> resorts = (List<?>) response.get("resorts");
+    if (resorts == null || resorts.isEmpty()) {
+      return ResponseEntity.status(HttpStatus.NOT_FOUND)
+          .body(ApiError.of("No vertical data found for the specified parameters", null));
+    }
+    return ResponseEntity.ok(response);
+  }
+
   private boolean isValidPathParameters(
       String resortID, String seasonID, String dayID, String skierID) {
     try {
@@ -213,6 +244,10 @@ public class SkierController {
     } catch (NumberFormatException e) {
       return false;
     }
+  }
+
+  private boolean isValidSkierResort(String skierID, String resort) {
+    return skierID != null && !skierID.isBlank() && resort != null && !resort.isBlank();
   }
 
   @Schema(description = "Error response")
