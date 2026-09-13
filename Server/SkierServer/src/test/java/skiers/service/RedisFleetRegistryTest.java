@@ -86,6 +86,90 @@ class RedisFleetRegistryTest {
   }
 
   @Test
+  @DisplayName(
+      "a single successful refresh that returns a smaller fleet is counted but not applied")
+  void aOneOffUndercountIsCountedButHeld() {
+    StringRedisTemplate redis = templateReporting(3L);
+    MeterRegistry meters = new SimpleMeterRegistry();
+    AtomicLong clock = new AtomicLong();
+    RedisFleetRegistry registry = new RedisFleetRegistry(redis, properties(), meters, clock::get);
+
+    registry.refresh();
+    assertThat(registry.size()).isEqualTo(3);
+    assertThat(meters.get("skier.fleet.registry.shrink").counter().count())
+        .as("growing to the first observed size is not a shrink")
+        .isEqualTo(0.0);
+
+    when(redis.opsForZSet().zCard(anyString())).thenReturn(1L);
+    clock.set(30_000);
+    registry.refresh();
+
+    assertThat(registry.size()).as("held rather than dropped to the unconfirmed size").isEqualTo(3);
+    assertThat(meters.get("skier.fleet.registry.shrink").counter().count())
+        .as("the sighting is still counted even though it is not applied")
+        .isEqualTo(1.0);
+    assertThat(meters.get("skier.fleet.registry.failures").counter().count())
+        .as("nothing failed; that is the whole problem")
+        .isEqualTo(0.0);
+    assertThat(registry.stalenessSeconds())
+        .as("the refresh itself succeeded, so staleness says fresh even though the size is held")
+        .isEqualTo(0.0);
+
+    when(redis.opsForZSet().zCard(anyString())).thenReturn(3L);
+    registry.refresh();
+    assertThat(registry.size()).isEqualTo(3);
+    assertThat(meters.get("skier.fleet.registry.shrink").counter().count()).isEqualTo(1.0);
+  }
+
+  @Test
+  @DisplayName("a shrink applies once the same smaller size is confirmed on consecutive refreshes")
+  void aRepeatedShrinkIsAppliedAfterConfirmation() {
+    StringRedisTemplate redis = templateReporting(3L);
+    MeterRegistry meters = new SimpleMeterRegistry();
+    SkierProperties properties = properties();
+    properties.getFleet().setShrinkConfirmations(3);
+    RedisFleetRegistry registry = new RedisFleetRegistry(redis, properties, meters);
+
+    registry.refresh();
+    assertThat(registry.size()).isEqualTo(3);
+
+    when(redis.opsForZSet().zCard(anyString())).thenReturn(2L);
+    registry.refresh();
+    assertThat(registry.size()).as("first sighting: held").isEqualTo(3);
+    registry.refresh();
+    assertThat(registry.size()).as("second sighting: still held").isEqualTo(3);
+    registry.refresh();
+    assertThat(registry.size()).as("third consecutive sighting: applied").isEqualTo(2);
+
+    assertThat(meters.get("skier.fleet.registry.shrink").counter().count())
+        .as("every sighting below the observed size is counted, applied or not")
+        .isEqualTo(3.0);
+  }
+
+  @Test
+  @DisplayName("a shrink streak resets when the reported size changes mid-streak")
+  void aChangingUndercountDoesNotAccumulateAStreak() {
+    StringRedisTemplate redis = templateReporting(4L);
+    MeterRegistry meters = new SimpleMeterRegistry();
+    SkierProperties properties = properties();
+    properties.getFleet().setShrinkConfirmations(3);
+    RedisFleetRegistry registry = new RedisFleetRegistry(redis, properties, meters);
+
+    registry.refresh();
+    assertThat(registry.size()).isEqualTo(4);
+
+    when(redis.opsForZSet().zCard(anyString())).thenReturn(3L);
+    registry.refresh();
+    when(redis.opsForZSet().zCard(anyString())).thenReturn(2L);
+    registry.refresh();
+    when(redis.opsForZSet().zCard(anyString())).thenReturn(3L);
+    registry.refresh();
+
+    assertThat(registry.size()).as("no run of matching sightings, so nothing applied").isEqualTo(4);
+    assertThat(meters.get("skier.fleet.registry.shrink").counter().count()).isEqualTo(3.0);
+  }
+
+  @Test
   @DisplayName("a null cardinality is a failure, not an empty fleet")
   void aNullCardinalityIsAFailure() {
     StringRedisTemplate redis = templateReporting(4L);
