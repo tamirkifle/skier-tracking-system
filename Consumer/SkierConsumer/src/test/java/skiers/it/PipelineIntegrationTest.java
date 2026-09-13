@@ -5,10 +5,17 @@ import static org.awaitility.Awaitility.await;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.QueueInformation;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -146,9 +153,86 @@ class PipelineIntegrationTest extends PipelineIntegrationTestBase {
   }
 
   @Test
+  @DisplayName("an unparseable message is dead-lettered rather than retried forever")
+  void malformedMessageReachesTheDeadLetterQueue() {
+    int before = rabbitAdmin.getQueueInfo(Constants.DLQ).getMessageCount();
+
+    // Well-formed JSON the converter accepts, but missing every field the listener requires.
+    rabbitTemplate.convertAndSend(
+        Constants.LIFT_RIDE_EXCHANGE,
+        Constants.LIFT_RIDE_ROUTING_KEY,
+        Map.of("notASkierEvent", "at all"));
+
+    await()
+        .atMost(Duration.ofSeconds(30))
+        .untilAsserted(
+            () ->
+                assertThat(rabbitAdmin.getQueueInfo(Constants.DLQ).getMessageCount())
+                    .isEqualTo(before + 1));
+  }
+
+  @Test
+  @DisplayName("the retry budget is spent across real broker redeliveries, then dead-lettered")
+  void retryBudgetIsSpentAcrossRealRedeliveries() {
+    // DynamoDB refuses an empty string in a key attribute, so every write attempt really fails.
+    String eventId = "budget-" + UUID.randomUUID();
+    Map<String, Object> message = new HashMap<>();
+    message.put("resortID", "5");
+    message.put("seasonID", "2025");
+    message.put("dayID", "1");
+    message.put("skierID", "");
+    message.put("liftID", 21);
+    message.put("time", 217);
+
+    rabbitTemplate.convertAndSend(
+        Constants.LIFT_RIDE_EXCHANGE,
+        Constants.LIFT_RIDE_ROUTING_KEY,
+        message,
+        amqpMessage -> {
+          amqpMessage.getMessageProperties().setHeader(Constants.HEADER_EVENT_ID, eventId);
+          return amqpMessage;
+        });
+
+    Message deadLettered =
+        await()
+            .atMost(Duration.ofSeconds(60))
+            .until(() -> findInDeadLetterQueue(eventId), Objects::nonNull);
+
+    Integer attempts = deadLettered.getMessageProperties().getHeader(Constants.HEADER_ATTEMPTS);
+    // max-retries is 2, so the header carries the last count written by a retry.
+    assertThat(attempts).isEqualTo(2);
+  }
+
+  @Test
+  @DisplayName("the retry route is declared, and its delay and return path are the configured ones")
+  void retryTopologyIsDeclared() {
+    QueueInformation retryQueue = rabbitAdmin.getQueueInfo(Constants.RETRY_QUEUE);
+    assertThat(retryQueue).isNotNull();
+
+    assertThat(retryQueue.getConsumerCount()).isZero();
+  }
+
+  @Test
   @DisplayName("the declared topology matches what the server declares")
   void topologyIsDeclared() {
     assertThat(rabbitAdmin.getQueueInfo(Constants.MAIN_QUEUE)).isNotNull();
     assertThat(rabbitAdmin.getQueueInfo(Constants.DLQ)).isNotNull();
+  }
+
+  private Message findInDeadLetterQueue(String eventId) {
+    Message found = null;
+    List<Message> others = new ArrayList<>();
+    Message message;
+    while ((message = rabbitTemplate.receive(Constants.DLQ, 200)) != null) {
+      String id = message.getMessageProperties().getHeader(Constants.HEADER_EVENT_ID);
+      if (eventId.equals(id)) {
+        found = message;
+      } else {
+        others.add(message);
+      }
+    }
+    others.forEach(
+        other -> rabbitTemplate.send(Constants.DLX, Constants.DEAD_LETTER_ROUTING_KEY, other));
+    return found;
   }
 }
