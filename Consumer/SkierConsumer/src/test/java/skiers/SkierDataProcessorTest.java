@@ -3,11 +3,13 @@ package skiers;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -86,6 +88,19 @@ class SkierDataProcessorTest {
         ack,
         null,
         priorAttempts);
+  }
+
+  private static LiftRideEvent stampedEvent(int skierId, long publishedAtMillis, RecordingAck ack) {
+    return new LiftRideEvent(
+        "evt-" + skierId,
+        String.valueOf(skierId),
+        "5",
+        "2025",
+        "1",
+        21,
+        100,
+        ack,
+        publishedAtMillis);
   }
 
   @AfterEach
@@ -364,6 +379,54 @@ class SkierDataProcessorTest {
     assertThat(ack.requeues()).isEqualTo(1);
 
     processor = null;
+  }
+
+  @Test
+  @DisplayName("a durable event contributes one freshness sample measured from its publish time")
+  void recordsFreshnessOnDurableWrite() {
+    build(1, 1, 0, 100, 3);
+    long publishedAt = System.currentTimeMillis() - 400;
+
+    RecordingAck ack = new RecordingAck();
+    processor.submit(stampedEvent(42, publishedAt, ack));
+
+    await().atMost(Duration.ofSeconds(5)).until(() -> ack.acks() == 1);
+
+    Timer freshness = registry.get("skier.pipeline.freshness").timer();
+    assertThat(freshness.count()).isEqualTo(1);
+    // The 400 ms predates the pipeline, so write latency cannot see it and freshness must.
+    assertThat(freshness.max(TimeUnit.MILLISECONDS)).isGreaterThanOrEqualTo(400.0);
+    assertThat(registry.get("skier.write.latency").timer().max(TimeUnit.MILLISECONDS))
+        .isLessThan(400.0);
+  }
+
+  @Test
+  @DisplayName("a dead-lettered event produces no freshness sample")
+  void doesNotRecordFreshnessForAnEventThatNeverBecameDurable() {
+    build(1, 1, 0, 100, 0);
+    writer.failEveryWriteWith(new IllegalStateException("permanently broken"));
+
+    RecordingAck ack = new RecordingAck();
+    processor.submit(stampedEvent(42, System.currentTimeMillis() - 400, ack));
+
+    await().atMost(Duration.ofSeconds(5)).until(() -> ack.deadLetters() == 1);
+
+    assertThat(registry.get("skier.pipeline.freshness").timer().count()).isZero();
+    assertThat(registry.get("skier.pipeline.freshness.unstamped").counter().count()).isZero();
+  }
+
+  @Test
+  @DisplayName("an unstamped durable event is counted as unmeasured rather than ignored")
+  void countsDurableEventsThatCarryNoPublishTimestamp() {
+    build(1, 1, 0, 100, 3);
+
+    RecordingAck ack = new RecordingAck();
+    processor.submit(event(42, 100, ack));
+
+    await().atMost(Duration.ofSeconds(5)).until(() -> ack.acks() == 1);
+
+    assertThat(registry.get("skier.pipeline.freshness").timer().count()).isZero();
+    assertThat(registry.get("skier.pipeline.freshness.unstamped").counter().count()).isEqualTo(1.0);
   }
 
   @Test
