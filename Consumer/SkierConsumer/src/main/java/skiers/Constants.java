@@ -39,6 +39,9 @@ public final class Constants {
 
   public static final String HEADER_EVENT_ID = "x-event-id";
 
+  /** Attempt count, on the wire because the listener decodes a fresh event per delivery. */
+  public static final String HEADER_ATTEMPTS = "x-attempts";
+
   public static final String HEADER_PUBLISHED_AT = "x-published-at";
 
   /** Vertical feet gained per lift ride: liftID x 10. */

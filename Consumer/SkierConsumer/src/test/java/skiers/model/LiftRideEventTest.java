@@ -47,6 +47,17 @@ class LiftRideEventTest {
   }
 
   @Test
+  @DisplayName("retry attempts accumulate per event")
+  void tracksAttempts() {
+    LiftRideEvent event = event("42", "5", "2025", "1", 21, 100);
+
+    assertThat(event.attempts()).isZero();
+    assertThat(event.recordAttempt()).isEqualTo(1);
+    assertThat(event.recordAttempt()).isEqualTo(2);
+    assertThat(event.attempts()).isEqualTo(2);
+  }
+
+  @Test
   @DisplayName("a missing key component is rejected at construction")
   void rejectsNullKeyComponents() {
     assertThatThrownBy(() -> event(null, "5", "2025", "1", 21, 100))

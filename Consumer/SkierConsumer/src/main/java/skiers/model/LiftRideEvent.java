@@ -108,6 +108,10 @@ public final class LiftRideEvent {
     return attempts;
   }
 
+  public int recordAttempt() {
+    return ++attempts;
+  }
+
   public int vertical() {
     return liftId * Constants.VERTICAL_FEET_PER_LIFT;
   }
