@@ -10,7 +10,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.Binding;
+import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -163,6 +167,49 @@ class IngestIntegrationTest {
   }
 
   @Test
+  @DisplayName("an unroutable publish is 503, not the 201 the broker's own ack would suggest")
+  void unroutablePublishIsNotAccepted() {
+    Binding binding =
+        BindingBuilder.bind(new Queue(Constants.MAIN_QUEUE))
+            .to(new TopicExchange(Constants.LIFT_RIDE_EXCHANGE))
+            .with(Constants.LIFT_RIDE_ROUTING_KEY);
+    rabbitAdmin.removeBinding(binding);
+
+    try {
+      // The exchange still exists, so RabbitMQ returns the message and then acks it.
+      ResponseEntity<String> response = post(44, "{\"liftID\":10,\"time\":100}");
+
+      assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+      assertThat(rabbitAdmin.getQueueInfo(Constants.MAIN_QUEUE).getMessageCount()).isZero();
+    } finally {
+      rabbitAdmin.declareBinding(binding);
+    }
+  }
+
+  @Test
+  @DisplayName("a client-supplied event id reaches the broker envelope unchanged")
+  void clientEventIdSurvivesToTheEnvelope() {
+    HttpHeaders headers = new HttpHeaders();
+    headers.setContentType(MediaType.APPLICATION_JSON);
+    headers.set(Constants.HEADER_EVENT_ID, "retry-of-unknown-outcome");
+
+    ResponseEntity<String> response =
+        rest.postForEntity(
+            PATH, new HttpEntity<>("{\"liftID\":10,\"time\":100}", headers), String.class, 45);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    await()
+        .atMost(Duration.ofSeconds(15))
+        .until(() -> rabbitAdmin.getQueueInfo(Constants.MAIN_QUEUE).getMessageCount() == 1);
+
+    Message received = rabbitTemplate.receive(Constants.MAIN_QUEUE, 5000);
+    String eventIdHeader = received.getMessageProperties().getHeader(Constants.HEADER_EVENT_ID);
+    assertThat(eventIdHeader).isEqualTo("retry-of-unknown-outcome");
+    assertThat(received.getMessageProperties().getMessageId())
+        .isEqualTo("retry-of-unknown-outcome");
+  }
+
+  @Test
   @DisplayName("messages are published as persistent, so a broker restart does not lose them")
   void publishesPersistentMessages() {
     post(43, "{\"liftID\":10,\"time\":100}");
@@ -181,6 +228,56 @@ class IngestIntegrationTest {
   void declaresCompatibleTopology() {
     assertThat(rabbitAdmin.getQueueInfo(Constants.MAIN_QUEUE)).isNotNull();
     assertThat(rabbitAdmin.getQueueInfo(Constants.DLQ)).isNotNull();
+  }
+
+  @Test
+  @DisplayName("under shedding, exactly the accepted events reach the queue")
+  void shedsWithoutPublishing() {
+    rateLimiter.adjustRateDown(1);
+    while (rateLimiter.tryAcquire()) {
+      // drain
+    }
+
+    int offered = 300;
+    int accepted = 0;
+    int shed = 0;
+    for (int i = 0; i < offered; i++) {
+      ResponseEntity<String> response =
+          post(2000 + i, "{\"liftID\":" + ((i % 40) + 1) + ",\"time\":" + ((i % 360) + 1) + "}");
+      if (response.getStatusCode() == HttpStatus.CREATED) {
+        accepted++;
+      } else if (response.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS) {
+        shed++;
+        assertThat(response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isEqualTo("1");
+      }
+    }
+
+    assertThat(shed)
+        .as("offering %d requests at the floor rate must shed some", offered)
+        .isPositive();
+    assertThat(accepted + shed).isEqualTo(offered);
+
+    final int expectedOnQueue = accepted;
+
+    await()
+        .atMost(Duration.ofSeconds(20))
+        .untilAsserted(
+            () ->
+                assertThat(rabbitAdmin.getQueueInfo(Constants.MAIN_QUEUE).getMessageCount())
+                    .isEqualTo(expectedOnQueue));
+  }
+
+  @Test
+  @DisplayName("an invalid body is rejected without spending a permit or publishing")
+  void rejectsInvalidWithoutPublishing() {
+    long grantedBefore = rateLimiter.grantedCount();
+
+    assertThat(post(45, "{\"liftID\":9999,\"time\":217}").getStatusCode())
+        .isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(post(45, "{}").getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+    assertThat(rabbitAdmin.getQueueInfo(Constants.MAIN_QUEUE).getMessageCount()).isZero();
+    assertThat(rateLimiter.grantedCount()).isEqualTo(grantedBefore);
   }
 
   @Test
