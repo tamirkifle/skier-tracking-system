@@ -172,6 +172,39 @@ class ControllerFleetTest {
     }
   }
 
+  private static FleetRegistry unsized() {
+    return new FleetRegistry() {
+      @Override
+      public int size() {
+        return 1;
+      }
+
+      @Override
+      public boolean isSized() {
+        return false;
+      }
+    };
+  }
+
+  @Test
+  @DisplayName("an instance that has never sized the fleet does not take the whole floor")
+  void anUnsizedInstanceTakesTheMinimumFloor() {
+    Fleet coordinated = coordinated(2, Constants.MAX_RATE);
+    Fleet newcomer = new Fleet(1, Constants.MAX_RATE, unsized());
+    for (int tick = 0; tick < 100; tick++) {
+      coordinated.observeDepth(Constants.MAX_QUEUE_SIZE + 500);
+      newcomer.observeDepth(Constants.MAX_QUEUE_SIZE + 500);
+    }
+
+    assertThat(newcomer.aggregateRate())
+        .as("the newcomer's own floor, with no observed fleet size to divide by")
+        .isEqualTo(1L);
+    // share() floors at 1, so an unsized instance costs the aggregate one permit/s.
+    assertThat(coordinated.aggregateRate() + newcomer.aggregateRate())
+        .as("aggregate floor of a coordinated pair plus one instance that never reached Redis")
+        .isLessThanOrEqualTo(DEFAULT_FLOOR + 1L);
+  }
+
   @Test
   @DisplayName("a coordinated fleet surrenders one decrease step per tick, not N")
   void coordinatedAdditiveDecreaseIsOneStep() {
