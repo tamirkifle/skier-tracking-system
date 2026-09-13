@@ -12,6 +12,7 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 
 @Configuration
@@ -45,6 +46,25 @@ public class AwsConfig {
 
     if (StringUtils.hasText(dynamoDbEndpoint)) {
       logger.info("DynamoDB (v2 sync) pointed at local endpoint {}", dynamoDbEndpoint);
+      builder.endpointOverride(URI.create(dynamoDbEndpoint));
+    }
+
+    return builder.build();
+  }
+
+  @Bean(destroyMethod = "close")
+  public DynamoDbAsyncClient dynamoDbAsyncClient() {
+    var builder =
+        DynamoDbAsyncClient.builder()
+            .credentialsProvider(DefaultCredentialsProvider.create())
+            .region(Region.of(region))
+            .overrideConfiguration(
+                ClientOverrideConfiguration.builder()
+                    .apiCallTimeout(Duration.ofMillis(Constants.DB_REQUEST_TIMEOUT))
+                    .build());
+
+    if (StringUtils.hasText(dynamoDbEndpoint)) {
+      logger.info("DynamoDB (v2 async) pointed at local endpoint {}", dynamoDbEndpoint);
       builder.endpointOverride(URI.create(dynamoDbEndpoint));
     }
 
