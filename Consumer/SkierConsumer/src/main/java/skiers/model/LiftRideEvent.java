@@ -112,6 +112,35 @@ public final class LiftRideEvent {
     return liftId * Constants.VERTICAL_FEET_PER_LIFT;
   }
 
+  /** Resort, season, day and minute, so two rides in one minute collide and the later wins. */
+  public String sortKey() {
+    return resortId + '#' + seasonId + '#' + dayId + '#' + time;
+  }
+
+  public String skierSeasonKey() {
+    return skierId + '#' + seasonId;
+  }
+
+  public String resortDayKey() {
+    return resortId + '#' + dayId;
+  }
+
+  public String resortSkierKey() {
+    return resortId + '#' + skierId;
+  }
+
+  public String seasonDayKey() {
+    return seasonId + '#' + dayId;
+  }
+
+  public String resortSeasonDayKey() {
+    return resortId + '#' + seasonId + '#' + dayId;
+  }
+
+  public String skierDayIdentity() {
+    return resortSeasonDayKey() + '#' + skierId;
+  }
+
   @Override
   public String toString() {
     return "LiftRideEvent{skier="
