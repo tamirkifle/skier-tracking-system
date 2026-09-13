@@ -11,6 +11,8 @@ endif
 COMPOSE ?= docker compose
 SERVER_URL ?= http://localhost:8080
 BENCH_OUT ?= benchmarks/out
+AB_EVENTS ?= 12000
+AB_AXIS ?= writer
 
 .PHONY: help
 help: ## Show this help
@@ -137,6 +139,24 @@ bench-open: ## Run the open-loop (fixed arrival rate) scenario
 		--scenario benchmarks/scenarios/open-loop-sweep.yaml \
 		--base-url $(SERVER_URL) \
 		--out $(BENCH_OUT)
+
+.PHONY: ab
+ab: ## A/B the write strategy (single vs batched BatchWriteItem)
+	$(MVN) -B -q -pl Client/SkierClient -am package -DskipTests
+	bash scripts/ab.sh writer $(AB_EVENTS)
+
+.PHONY: ab-cardinality
+ab-cardinality: ## A/B the cardinality strategy (exact sentinel vs Redis HyperLogLog)
+	$(MVN) -B -q -pl Client/SkierClient -am package -DskipTests
+	bash scripts/ab.sh cardinality $(AB_EVENTS)
+
+# The check that the per-arm state reset in scripts/ab.sh actually removed the ordering bias: swap
+# the arms and confirm the result does not move. A fix verified in one arm order has not been
+# verified. `make ab-reverse AB_AXIS=cardinality` does the other axis.
+.PHONY: ab-reverse
+ab-reverse: ## Re-run an A/B ($(AB_AXIS)) with the arms in the opposite order
+	$(MVN) -B -q -pl Client/SkierClient -am package -DskipTests
+	AB_REVERSE=1 bash scripts/ab.sh $(AB_AXIS) $(AB_EVENTS)
 
 .PHONY: bench-smoke
 bench-smoke: ## A 2,000-request benchmark, for checking the harness works
