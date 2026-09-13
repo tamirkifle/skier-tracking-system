@@ -5,6 +5,12 @@ public final class Constants {
 
   private Constants() {}
 
+  public static final int MAX_RATE = 8000;
+
+  public static final int TARGET_QUEUE_SIZE = 150;
+  public static final int MAX_QUEUE_SIZE = 200;
+  public static final int MIN_QUEUE_SIZE = 100;
+
   public static final String MAIN_QUEUE = "liftRideQueue";
   public static final String LIFT_RIDE_EXCHANGE = "liftRideExchange";
   public static final String LIFT_RIDE_ROUTING_KEY = "lift.ride";
