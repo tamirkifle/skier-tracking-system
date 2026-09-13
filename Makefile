@@ -215,6 +215,10 @@ bench-smoke: ## A 2,000-request benchmark, for checking the harness works
 
 # --- Housekeeping ----------------------------------------------------------------------------
 
+.PHONY: secrets-scan
+secrets-scan: ## Scan the full history for credentials (requires gitleaks)
+	gitleaks detect --no-banner --redact --verbose
+
 .PHONY: clean
 clean: ## Remove build output
 	$(MVN) -B clean
