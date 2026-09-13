@@ -13,6 +13,10 @@ public final class Constants {
   public static final String LIFT_RIDE_ROUTING_KEY = "lift.ride";
   public static final String DEAD_LETTER_ROUTING_KEY = "dead.letter";
 
+  public static final String RETRY_QUEUE = "liftRideRetryQueue";
+
+  public static final String RETRY_ROUTING_KEY = "lift.ride.retry";
+
   public static final String LIFT_RIDES_TABLE = "LiftRides";
   public static final String SKIER_COUNTS_TABLE = "SkierCounts";
   public static final String SKIER_TRACKING_TABLE = "SkierTracking";

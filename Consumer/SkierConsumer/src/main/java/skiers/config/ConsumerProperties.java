@@ -6,9 +6,15 @@ import org.springframework.boot.context.properties.NestedConfigurationProperty;
 @ConfigurationProperties(prefix = "skier")
 public class ConsumerProperties {
 
+  @NestedConfigurationProperty private final Consumer consumer = new Consumer();
+
   @NestedConfigurationProperty private final Writer writer = new Writer();
 
   @NestedConfigurationProperty private final Cardinality cardinality = new Cardinality();
+
+  public Consumer getConsumer() {
+    return consumer;
+  }
 
   public Writer getWriter() {
     return writer;
@@ -16,6 +22,36 @@ public class ConsumerProperties {
 
   public Cardinality getCardinality() {
     return cardinality;
+  }
+
+  public static class Consumer {
+    private int concurrency = 32;
+    private int maxConcurrency = 64;
+    private int prefetch = 250;
+
+    public int getConcurrency() {
+      return concurrency;
+    }
+
+    public void setConcurrency(int concurrency) {
+      this.concurrency = concurrency;
+    }
+
+    public int getMaxConcurrency() {
+      return maxConcurrency;
+    }
+
+    public void setMaxConcurrency(int maxConcurrency) {
+      this.maxConcurrency = maxConcurrency;
+    }
+
+    public int getPrefetch() {
+      return prefetch;
+    }
+
+    public void setPrefetch(int prefetch) {
+      this.prefetch = prefetch;
+    }
   }
 
   public static class Writer {
