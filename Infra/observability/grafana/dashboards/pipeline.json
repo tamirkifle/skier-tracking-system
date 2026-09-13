@@ -1,0 +1,310 @@
+{
+  "title": "Skier Pipeline",
+  "uid": "skier-pipeline",
+  "tags": ["skiers", "pipeline"],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "description": "Laid out as the event's own journey: what the front door decided, what the broker is holding, what the write path did with it. Read top to bottom and you have traced a lift ride end to end.",
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Front door, what did we accept?",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Ingest outcomes",
+      "description": "Accepted, shed and invalid are stacked deliberately: the total is offered load, and the split is the admission controller's decision. A rising shed band with flat accepted means the pipeline is at capacity and the front door knows it.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "fillOpacity": 35, "stacking": { "mode": "normal" }, "lineWidth": 1 }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "accepted" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "shed (429)" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] },
+          { "matcher": { "id": "byName", "options": "invalid (400)" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } }] },
+          { "matcher": { "id": "byName", "options": "publish failed (503)" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      },
+      "targets": [
+        { "expr": "sum(rate(skier_ingest_accepted_total[1m]))", "legendFormat": "accepted", "refId": "A" },
+        { "expr": "sum(rate(skier_ingest_shed_total[1m]))", "legendFormat": "shed (429)", "refId": "B" },
+        { "expr": "sum(rate(skier_ingest_invalid_total[1m]))", "legendFormat": "invalid (400)", "refId": "C" },
+        { "expr": "sum(rate(skier_ingest_publish_failed_total[1m]))", "legendFormat": "publish failed (503)", "refId": "D" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Ingest latency percentiles",
+      "description": "Percentiles from the histogram, never an average. The gap between p50 and p99 is the interesting signal: a widening gap under constant throughput is queueing somewhere.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "fillOpacity": 0, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_requests_seconds_bucket{service=\"server\"}[1m])))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{service=\"server\"}[1m])))", "legendFormat": "p95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{service=\"server\"}[1m])))", "legendFormat": "p99", "refId": "C" }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Control loop, how hard is the front door pushing back?",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Admission rate vs queue depth",
+      "description": "The AIMD control loop, visible. Queue depth is the input and admission rate is the output, so these two lines are cause and effect on one axis pair, the shape of a healthy loop is depth oscillating around the setpoint while rate saws.",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 10 },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "queue depth (messages)" },
+            "properties": [
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "target depth" },
+            "properties": [
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        { "expr": "max(skier_admission_rate)", "legendFormat": "admission rate (permits/s)", "refId": "A" },
+        { "expr": "max(skier_queue_depth)", "legendFormat": "queue depth (messages)", "refId": "B" },
+        { "expr": "vector(150)", "legendFormat": "target depth", "refId": "C" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Available permits",
+      "description": "Token-bucket contents. Persistently near zero means every request is waiting for a refill.",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 10 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 50 },
+              { "color": "green", "value": 200 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "graphMode": "area", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "max(skier_admission_tokens)", "legendFormat": "permits", "refId": "A" }]
+    },
+    {
+      "type": "row",
+      "title": "Queue latency estimator, is the backlog a problem yet?",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Estimated queue latency vs target",
+      "description": "skier_queue_latency_seconds is the depth-and-drain-rate estimate, exported in both setpoint modes so it is worth watching even when depth is what steers. The dashed line is skier.queue-monitor.target-latency (1.875s default), the threshold latency mode compares against, not an alert boundary in depth mode, just the reference the estimate is measured relative to. Directly comparable to SLO objective 5's 30s budget. A non-empty, non-draining queue reports +Inf, which is left unclamped: Grafana renders it as a gap, and a gap here means the estimator saw a real stall rather than missing data (NaN before the drain-rate window has filled is the same gap for a different reason, check skier_queue_drain_unresolved_total to tell them apart).",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 20 },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "drain rate (events/s)" },
+            "properties": [
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "unit", "value": "ops" },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "target latency" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        { "expr": "max(skier_queue_latency_seconds)", "legendFormat": "estimated queue latency", "refId": "A" },
+        { "expr": "vector(1.875)", "legendFormat": "target latency", "refId": "B" },
+        { "expr": "max(skier_queue_drain_rate)", "legendFormat": "drain rate (events/s)", "refId": "C" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Drain-rate unresolved ticks",
+      "description": "skier_queue_drain_unresolved_total counts controller ticks where no drain rate could be computed (e.g. no prior sample in the window yet). A rate that never settles near zero means the estimate is rarely usable, which is why depth stays the default setpoint.",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 20 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.1 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "graphMode": "area", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "expr": "sum(rate(skier_queue_drain_unresolved_total[5m]))", "legendFormat": "unresolved ticks/s", "refId": "A" }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Write path, did the event actually land?",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 29 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Write outcomes",
+      "description": "Dead-lettered is the only line here that represents permanent loss, so it is red and has its own alert. Requeued is backpressure, not loss.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 },
+      "fieldConfig": {
+        "defaults": { "unit": "wps", "custom": { "fillOpacity": 25, "lineWidth": 1 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "dead-lettered" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byName", "options": "written" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] }
+        ]
+      },
+      "targets": [
+        { "expr": "sum(rate(skier_write_total[1m]))", "legendFormat": "written", "refId": "A" },
+        { "expr": "sum(rate(skier_write_retries_total[1m]))", "legendFormat": "retried", "refId": "B" },
+        { "expr": "sum(rate(skier_write_requeued_total[1m]))", "legendFormat": "requeued", "refId": "C" },
+        { "expr": "sum(rate(skier_write_dropped_total[1m]))", "legendFormat": "dead-lettered", "refId": "D" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Batch efficiency",
+      "description": "Items per DynamoDB request. This is the single number the batched writer exists to move: 1.0 means it is degenerating to one request per event, 25 means full coalescing.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 },
+      "fieldConfig": {
+        "defaults": { "min": 0, "max": 25, "custom": { "fillOpacity": 20, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(skier_write_batch_size_sum[1m])) / clamp_min(sum(rate(skier_write_batch_size_count[1m])), 0.001)",
+          "legendFormat": "mean items per request",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Consumer queue depths",
+      "description": "Two different backlogs that are easy to confuse. Staging is our heap; the broker queue is RabbitMQ's. Which one is growing tells you whether the consumer or DynamoDB is the constraint.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 38 },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 15, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "max(skier_write_staging_depth)", "legendFormat": "staging (consumer heap)", "refId": "A" },
+        { "expr": "max(skier_write_inflight)", "legendFormat": "in flight to DynamoDB", "refId": "B" },
+        { "expr": "max(skier_queue_depth) > 0", "legendFormat": "broker queue", "refId": "C" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Unique-skier cardinality work",
+      "description": "Suppressed duplicates dominate by design: roughly 87% of events are repeat sightings of a skier already counted for that resort-day, and each one costs a failed conditional write.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 38 },
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "custom": { "fillOpacity": 25, "stacking": { "mode": "normal" } } },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "sum(rate(skier_cardinality_unique_observed_total[1m]))", "legendFormat": "first sightings", "refId": "A" },
+        { "expr": "sum(rate(skier_cardinality_duplicate_suppressed_total[1m]))", "legendFormat": "duplicates suppressed", "refId": "B" }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Dependencies",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 46 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "DynamoDB circuit breaker state",
+      "description": "1 = the breaker is in that state. A breaker that flaps between half-open and open is a dependency that is degraded rather than down.",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 47 },
+      "fieldConfig": {
+        "defaults": { "min": 0, "max": 1, "custom": { "fillOpacity": 30, "stacking": { "mode": "normal" } } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "resilience4j_circuitbreaker_state{name=\"dynamodb\"}",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Cache effectiveness",
+      "description": "Hit ratio against bypasses. A read path whose hit ratio collapses is about to become a DynamoDB bill.",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 47 },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "cache errors (rps)" },
+            "properties": [
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "unit", "value": "reqps" },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(cache_gets_total{result=\"hit\"}[5m])) / clamp_min(sum(rate(cache_gets_total[5m])), 0.001)",
+          "legendFormat": "hit ratio",
+          "refId": "A"
+        },
+        { "expr": "sum(rate(skier_cache_errors_total[5m]))", "legendFormat": "cache errors (rps)", "refId": "B" }
+      ]
+    }
+  ]
+}
