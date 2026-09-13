@@ -14,4 +14,7 @@ public final class Constants {
   public static final String HEADER_EVENT_ID = "x-event-id";
 
   public static final String HEADER_PUBLISHED_AT = "x-published-at";
+
+  /** Vertical feet gained per lift ride: liftID x 10. */
+  public static final int VERTICAL_FEET_PER_LIFT = 10;
 }
