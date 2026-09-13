@@ -31,6 +31,12 @@
       <artifactId>spring-boot-starter-actuator</artifactId>
     </dependency>
 
+    <!-- Redis backs the HyperLogLog cardinality strategy -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>
+
     <!-- Persistence -->
     <dependency>
       <groupId>software.amazon.awssdk</groupId>
