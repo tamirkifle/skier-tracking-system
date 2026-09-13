@@ -122,6 +122,12 @@ schema: ## Re-apply the DynamoDB schema (idempotent)
 smoke: ## Post one event and read it back through every query endpoint
 	@bash scripts/smoke.sh
 
+# Deliberately not folded into `smoke`: one run costs the longest TTL it measures (5 minutes with
+# --include-totals), which is too slow for a check that gates `make ci-local`.
+.PHONY: queryability
+queryability: ## Measure accept-to-queryable, SLO objective 5 plus the read cache's TTL term
+	@bash scripts/queryability.sh $(QUERYABILITY_ARGS)
+
 # --- Benchmarks ------------------------------------------------------------------------------
 
 .PHONY: bench
