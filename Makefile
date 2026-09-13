@@ -13,6 +13,7 @@ SERVER_URL ?= http://localhost:8080
 BENCH_OUT ?= benchmarks/out
 AB_EVENTS ?= 12000
 AB_AXIS ?= writer
+FLEET_N ?= 2
 
 .PHONY: help
 help: ## Show this help
@@ -170,12 +171,29 @@ ab-reverse: ## Re-run an A/B ($(AB_AXIS)) with the arms in the opposite order
 	$(MVN) -B -q -pl Client/SkierClient -am package -DskipTests
 	AB_REVERSE=1 bash scripts/ab.sh $(AB_AXIS) $(AB_EVENTS)
 
+# A fleet arm is one value of N, not a comparison: N=1 and N=2 are two invocations, each of which
+# resets the datastores and recreates the replicas first. Keeping them separate is deliberate, a
+# single target that ran both would tempt a reader into treating the pair as an A/B, and the harness
+# note in scripts/fleet.sh is that only the count-shaped results here are worth arguing from.
+.PHONY: fleet
+fleet: ## Overload N server replicas with the controller live (FLEET_N=2)
+	$(MVN) -B -q -pl Client/SkierClient -am package -DskipTests
+	bash scripts/fleet.sh $(FLEET_N)
+
+# Deliberately not folded into `fleet`: this one offers no load at all. The quantity is a gauge each
+# replica computes on its heartbeat thread, so a consumer drain rate and LocalStack's mood would be
+# noise added to a measurement that does not depend on either, and it is why this arm is runnable
+# when the throughput arms need the host to saturate.
 # Not folded into `make it`: it needs a running Compose stack, kills a container, and takes a couple
 # of minutes. It is the check that the delivery claims survive a process death, which no test in the
 # suite covers, a Testcontainers consumer cannot be SIGKILLed out from under its own JVM.
 .PHONY: recovery
 recovery: ## Kill the consumer mid-drain and reconcile every published event against DynamoDB
 	@bash scripts/recovery.sh
+
+.PHONY: fleet-down
+fleet-down: ## Stop the replicated stack and return to a single server on port 8080
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.scale.yml down --remove-orphans
 
 .PHONY: bench-smoke
 bench-smoke: ## A 2,000-request benchmark, for checking the harness works
