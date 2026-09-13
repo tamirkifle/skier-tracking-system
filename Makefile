@@ -8,6 +8,9 @@ ifeq (,$(wildcard ./mvnw))
 MVN := mvn
 endif
 
+SERVER_URL ?= http://localhost:8080
+BENCH_OUT ?= benchmarks/out
+
 .PHONY: help
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -33,3 +36,36 @@ format-check: ## Fail if any file is unformatted
 
 .PHONY: lint
 lint: format-check ## Alias for format-check
+
+# --- Benchmarks ------------------------------------------------------------------------------
+
+.PHONY: bench
+bench: ## Run the default benchmark scenario against the local stack
+	$(MVN) -B -q -pl Client/SkierClient -am package -DskipTests
+	java -jar Client/SkierClient/target/skier-client.jar run \
+		--scenario benchmarks/scenarios/closed-loop-200k.yaml \
+		--base-url $(SERVER_URL) \
+		--out $(BENCH_OUT)
+
+.PHONY: bench-open
+bench-open: ## Run the open-loop (fixed arrival rate) scenario
+	$(MVN) -B -q -pl Client/SkierClient -am package -DskipTests
+	java -jar Client/SkierClient/target/skier-client.jar run \
+		--scenario benchmarks/scenarios/open-loop-sweep.yaml \
+		--base-url $(SERVER_URL) \
+		--out $(BENCH_OUT)
+
+.PHONY: bench-smoke
+bench-smoke: ## A 2,000-request benchmark, for checking the harness works
+	$(MVN) -B -q -pl Client/SkierClient -am package -DskipTests
+	java -jar Client/SkierClient/target/skier-client.jar run \
+		--scenario benchmarks/scenarios/smoke.yaml \
+		--base-url $(SERVER_URL) \
+		--out $(BENCH_OUT)
+
+# --- Housekeeping ----------------------------------------------------------------------------
+
+.PHONY: clean
+clean: ## Remove build output
+	$(MVN) -B clean
+	rm -rf $(BENCH_OUT)
