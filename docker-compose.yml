@@ -161,6 +161,39 @@ services:
       TRACING_SAMPLE_RATE: "${TRACING_SAMPLE_RATE:-1.0}"
     networks: [skiers]
 
+  # --- Observability ------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: skiers-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./Infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./Infra/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=6h
+    networks: [skiers]
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: skiers-grafana
+    ports:
+      - "3000:3000"
+    depends_on: [prometheus]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      # Provisioned, not clicked. A dashboard that only exists in someone's browser is not an
+      # artifact, the whole point of committing it is that the next person sees the same graphs.
+      - ./Infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./Infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks: [skiers]
+
 networks:
   skiers:
     driver: bridge
