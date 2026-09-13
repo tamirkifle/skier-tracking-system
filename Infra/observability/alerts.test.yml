@@ -1,0 +1,130 @@
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # --- PipelineFreshnessObjectiveAtRisk -----------------------------------------------------
+  - interval: 1m
+    input_series:
+      - series: 'skier_pipeline_freshness_seconds_bucket{le="30.0"}'
+        values: "0+5x30"
+      - series: "skier_pipeline_freshness_seconds_count"
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: PipelineFreshnessObjectiveAtRisk
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              slo: pipeline-freshness
+            exp_annotations:
+              summary: "Accepted events are taking over 30s to become queryable"
+              description: >
+                Compare against skier_write_latency_seconds, which starts at dequeue. If write latency
+                is flat while freshness is climbing, the time is being spent in the broker and the
+                consumer is under-provisioned rather than slow. Check queue depth and consumer count.
+
+  - interval: 1m
+    input_series:
+      - series: 'skier_pipeline_freshness_seconds_bucket{le="30.0"}'
+        values: "0+10x30"
+      - series: "skier_pipeline_freshness_seconds_count"
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: PipelineFreshnessObjectiveAtRisk
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'skier_pipeline_freshness_seconds_bucket{le="30.0"}'
+        values: "0x30"
+      - series: "skier_pipeline_freshness_seconds_count"
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: PipelineFreshnessObjectiveAtRisk
+        exp_alerts: []
+
+  # --- SustainedLoadShedding -----------------------------------------------------------------
+  - interval: 1m
+    input_series:
+      - series: "skier_ingest_shed_total"
+        values: "0+10x30"
+      - series: "skier_ingest_accepted_total"
+        values: "0+50x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SustainedLoadShedding
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+            exp_annotations:
+              summary: "Over 5% of ingest requests are being shed"
+
+  - interval: 1m
+    input_series:
+      - series: "skier_ingest_shed_total"
+        values: "0+1x30"
+      - series: "skier_ingest_accepted_total"
+        values: "0+99x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SustainedLoadShedding
+        exp_alerts: []
+
+  # --- AdmissionControlPinnedAtFloor -----------------------------------------------------------
+  - interval: 1m
+    input_series:
+      - series: "skier_admission_floor_pinned_total"
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: AdmissionControlPinnedAtFloor
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              summary: "Admission control has bottomed out at its floor rate"
+              description: >
+                The server is shedding everything it is permitted to and the queue-depth controller
+                cannot reduce further, so the backlog grows regardless. The bottleneck is the consumer
+                or DynamoDB, not the API. If skier_admission_rate_floor exceeds what the pipeline
+                drains, no setpoint formulation fixes this, lower skier.admission.min-rate.
+
+  - interval: 1m
+    input_series:
+      - series: "skier_admission_floor_pinned_total"
+        values: "0 1 2 3 4 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: AdmissionControlPinnedAtFloor
+        exp_alerts: []
+
+  # --- FleetSizeStale --------------------------------------------------------------------------
+  - interval: 1m
+    input_series:
+      - series: 'skier_fleet_registry_staleness_seconds{instance="server-1"}'
+        values: "0+30x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: FleetSizeStale
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+            exp_annotations:
+              summary: "A server's fleet-size view has not refreshed for over two minutes"
+              description: >
+                One or more servers cannot reach Redis to count their peers and are holding the last
+                size they saw. Admission stays conservative rather than opening up, but a scale-up or
+                scale-down since then is not reflected in the per-instance floor or step sizes.
+
+  - interval: 1m
+    input_series:
+      - series: 'skier_fleet_registry_staleness_seconds{instance="server-1"}'
+        values: "0 2 0 2 0 2 0 2 0 2 0 2 0 2 0 2 0 2 0 2 0 2 0 2 0 2 0 2 0 2 0"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: FleetSizeStale
+        exp_alerts: []
