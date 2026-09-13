@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import skiers.cardinality.UniqueSkierCounter;
 import skiers.config.ConsumerProperties;
 import skiers.metrics.ConsumerMetrics;
 import skiers.model.LiftRideEvent;
@@ -24,13 +25,18 @@ public class SkierDataProcessor {
   private static final Logger logger = LoggerFactory.getLogger(SkierDataProcessor.class);
 
   private final BlockingQueue<LiftRideEvent> stagingQueue;
+  private final UniqueSkierCounter uniqueSkierCounter;
   private final ConsumerMetrics metrics;
   private final ConsumerProperties.Writer config;
 
   private final AtomicBoolean running = new AtomicBoolean(true);
 
   public SkierDataProcessor(
-      ConsumerMetrics metrics, ConsumerProperties properties, MeterRegistry registry) {
+      UniqueSkierCounter uniqueSkierCounter,
+      ConsumerMetrics metrics,
+      ConsumerProperties properties,
+      MeterRegistry registry) {
+    this.uniqueSkierCounter = uniqueSkierCounter;
     this.metrics = metrics;
     this.config = properties.getWriter();
     this.stagingQueue = new LinkedBlockingQueue<>(config.getQueueCapacity());
@@ -51,6 +57,26 @@ public class SkierDataProcessor {
     }
     metrics.queueDepth(stagingQueue.size());
     return true;
+  }
+
+  /**
+   * Updates the derived unique-skier count, and reports whether the delivery may be settled.
+   *
+   * <p>An exact count that misses an increment cannot repair itself, so the delivery is retried. An
+   * estimate self-corrects on the next sighting, so the ride settles and the failure is logged.
+   */
+  private boolean updateCardinality(LiftRideEvent event) {
+    try {
+      uniqueSkierCounter.observe(event);
+      return true;
+    } catch (RuntimeException e) {
+      logger.warn("Cardinality update failed for {}: {}", event.skierId(), e.getMessage());
+      if (!uniqueSkierCounter.projectionRequired()) {
+        return true;
+      }
+      metrics.recordProjectionUnresolved();
+      return false;
+    }
   }
 
   public int stagedCount() {
