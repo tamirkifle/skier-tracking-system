@@ -15,9 +15,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import skiers.Constants;
+import skiers.model.ResortSkierCount;
 import skiers.model.SkierVertical;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
 import software.amazon.awssdk.services.dynamodb.model.ProvisionedThroughputExceededException;
 import software.amazon.awssdk.services.dynamodb.model.QueryRequest;
 import software.amazon.awssdk.services.dynamodb.model.QueryResponse;
@@ -169,6 +172,42 @@ class SkierServiceTest {
 
     assertThatThrownBy(() -> service.getSkierResortTotals("42", "5", "2025"))
         .isInstanceOf(ProvisionedThroughputExceededException.class);
+  }
+
+  @Test
+  @DisplayName("unique skier count reads the precomputed counter row")
+  void readsUniqueSkierCounter() {
+    when(dynamoDb.getItem(any(GetItemRequest.class)))
+        .thenReturn(
+            GetItemResponse.builder()
+                .item(Map.of(Constants.ATTR_UNIQUE_SKIER_COUNT, AttributeValue.fromN("1234")))
+                .build());
+
+    ResortSkierCount result = service.getUniqueSkiersCount("5", "2025", "1");
+
+    assertThat(result.getUniqueNumSkiers()).isEqualTo(1234);
+    assertThat(result.getResortID()).isEqualTo("5");
+  }
+
+  @Test
+  @DisplayName("a missing counter row reads as zero, not as an error")
+  void missingCounterRowIsZero() {
+    // SDK v2 reports an absent item as an empty map rather than a null.
+    when(dynamoDb.getItem(any(GetItemRequest.class))).thenReturn(GetItemResponse.builder().build());
+
+    assertThat(service.getUniqueSkiersCount("5", "2025", "1").getUniqueNumSkiers()).isZero();
+  }
+
+  @Test
+  @DisplayName("a counter row present but carrying no count reads as zero")
+  void counterRowWithoutCountIsZero() {
+    when(dynamoDb.getItem(any(GetItemRequest.class)))
+        .thenReturn(
+            GetItemResponse.builder()
+                .item(Map.of(Constants.ATTR_RESORT_SEASON_DAY, AttributeValue.fromS("5#2025#1")))
+                .build());
+
+    assertThat(service.getUniqueSkiersCount("5", "2025", "1").getUniqueNumSkiers()).isZero();
   }
 
   @Test

@@ -12,9 +12,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import skiers.Constants;
+import skiers.model.ResortSkierCount;
 import skiers.model.SkierVertical;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
 import software.amazon.awssdk.services.dynamodb.model.QueryRequest;
 import software.amazon.awssdk.services.dynamodb.model.QueryResponse;
 
@@ -48,6 +51,16 @@ public class SkierService {
       String resortID, String seasonID, String dayID, String skierID) {
     return new SkierVertical(
         resortID, seasonID, dayID, skierID, fetchDayVertical(resortID, seasonID, dayID, skierID));
+  }
+
+  /** Not cached when zero: the counter row does not exist until the first skier is counted. */
+  @Cacheable(
+      value = "resortSkierCount",
+      key = "{#resortID, #seasonID, #dayID}",
+      unless = "#result == null || #result.uniqueNumSkiers == 0")
+  @CircuitBreaker(name = CIRCUIT)
+  public ResortSkierCount getUniqueSkiersCount(String resortID, String seasonID, String dayID) {
+    return new ResortSkierCount(resortID, fetchUniqueSkiersCount(resortID, seasonID, dayID));
   }
 
   @Cacheable(
@@ -88,6 +101,24 @@ public class SkierService {
             .build();
 
     return sumVertical(request);
+  }
+
+  private int fetchUniqueSkiersCount(String resortID, String seasonID, String dayID) {
+    String key = resortID + '#' + seasonID + '#' + dayID;
+    GetItemResponse response =
+        dynamoDb.getItem(
+            GetItemRequest.builder()
+                .tableName(Constants.SKIER_COUNTS_TABLE)
+                .key(Map.of(Constants.ATTR_RESORT_SEASON_DAY, AttributeValue.fromS(key)))
+                .build());
+
+    // hasItem() rather than a null test on item(): SDK v2 reports an absent item as an empty map,
+    // so a null check compiles, never fires, and dereferences the empty map one line later.
+    if (!response.hasItem()) {
+      return 0;
+    }
+    AttributeValue count = response.item().get(Constants.ATTR_UNIQUE_SKIER_COUNT);
+    return count == null ? 0 : readInt(count);
   }
 
   private Map<String, Integer> fetchSkierResortTotals(
