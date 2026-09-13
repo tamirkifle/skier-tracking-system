@@ -7,7 +7,9 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.RedisCallback;
@@ -59,5 +61,43 @@ class RedisFleetRegistryTest {
     assertThat(registry.size()).as("before the first refresh").isEqualTo(1);
     registry.refresh();
     assertThat(registry.size()).as("after one refresh").isEqualTo(3);
+  }
+
+  @Test
+  @DisplayName("a failed refresh holds the last known size rather than falling back to one")
+  void aFailedRefreshHoldsTheLastKnownSize() {
+    StringRedisTemplate redis = templateReporting(2L);
+    MeterRegistry meters = new SimpleMeterRegistry();
+    AtomicLong clock = new AtomicLong();
+    RedisFleetRegistry registry = new RedisFleetRegistry(redis, properties(), meters, clock::get);
+
+    registry.refresh();
+    assertThat(registry.size()).isEqualTo(2);
+
+    when(redis.opsForZSet()).thenThrow(new IllegalStateException("connection refused"));
+    clock.set(30_000);
+    registry.refresh();
+
+    assertThat(registry.size()).as("held through the outage").isEqualTo(2);
+    assertThat(meters.get("skier.fleet.registry.failures").counter().count()).isEqualTo(1.0);
+    assertThat(registry.stalenessSeconds())
+        .as("and the scrape can tell a held value from a fresh one")
+        .isEqualTo(30.0);
+  }
+
+  @Test
+  @DisplayName("a null cardinality is a failure, not an empty fleet")
+  void aNullCardinalityIsAFailure() {
+    StringRedisTemplate redis = templateReporting(4L);
+    MeterRegistry meters = new SimpleMeterRegistry();
+    RedisFleetRegistry registry = new RedisFleetRegistry(redis, properties(), meters);
+    registry.refresh();
+    assertThat(registry.size()).isEqualTo(4);
+
+    when(redis.opsForZSet().zCard(anyString())).thenReturn(null);
+    registry.refresh();
+
+    assertThat(registry.size()).isEqualTo(4);
+    assertThat(meters.get("skier.fleet.registry.failures").counter().count()).isEqualTo(1.0);
   }
 }
