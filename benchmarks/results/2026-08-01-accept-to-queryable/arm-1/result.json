@@ -1,0 +1,15 @@
+{
+  "probe": "scripts/queryability.sh",
+  "started_utc": "2026-08-01T18:57:41Z",
+  "poll_interval_seconds": 0.25,
+  "arms": [
+    {"arm": "vertical/first (fresh key)", "cache": "skierDayVertical", "ttl_seconds": 10, "mode": "first", "queryable_seconds": 1.113, "freshness_mean_seconds": 0.948, "cache_term_seconds": 0.165, "freshness_samples": 1, "observed": 210, "target": 210, "flipped": true},
+    {"arm": "vertical/warm (read before write)", "cache": "skierDayVertical", "ttl_seconds": 10, "mode": "warm", "queryable_seconds": 10.325, "freshness_mean_seconds": 0.049, "cache_term_seconds": 10.276, "freshness_samples": 2, "observed": 420, "target": 420, "flipped": true},
+    {"arm": "vertical/cold (no read before)", "cache": "skierDayVertical", "ttl_seconds": 10, "mode": "cold", "queryable_seconds": 10.340, "freshness_mean_seconds": 0.081, "cache_term_seconds": 10.259, "freshness_samples": 2, "observed": 420, "target": 420, "flipped": true},
+    {"arm": "count/first (virgin resort-day)", "cache": "resortSkierCount", "ttl_seconds": 30, "mode": "first", "queryable_seconds": 0.377, "freshness_mean_seconds": 0.126, "cache_term_seconds": 0.251, "freshness_samples": 1, "observed": 1, "target": 1, "flipped": true},
+    {"arm": "count/warm (read before write)", "cache": "resortSkierCount", "ttl_seconds": 30, "mode": "warm", "queryable_seconds": 30.127, "freshness_mean_seconds": 0.037, "cache_term_seconds": 30.089, "freshness_samples": 2, "observed": 2, "target": 2, "flipped": true},
+    {"arm": "count/cold (no read before)", "cache": "resortSkierCount", "ttl_seconds": 30, "mode": "cold", "queryable_seconds": 30.302, "freshness_mean_seconds": 0.099, "cache_term_seconds": 30.203, "freshness_samples": 2, "observed": 2, "target": 2, "flipped": true},
+    {"arm": "totals/first (fresh key)", "cache": "skierResortTotals", "ttl_seconds": 300, "mode": "first", "queryable_seconds": 0.131, "freshness_mean_seconds": 0.081, "cache_term_seconds": 0.050, "freshness_samples": 1, "observed": 210, "target": 210, "flipped": true},
+    {"arm": "totals/warm (read before write)", "cache": "skierResortTotals", "ttl_seconds": 300, "mode": "warm", "queryable_seconds": 300.113, "freshness_mean_seconds": 0.042, "cache_term_seconds": 300.071, "freshness_samples": 2, "observed": 420, "target": 420, "flipped": true}
+  ]
+}

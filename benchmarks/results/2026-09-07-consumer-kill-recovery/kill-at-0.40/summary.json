@@ -1,0 +1,24 @@
+{
+  "events_offered": 1000,
+  "accepted_201": 1000,
+  "unknown_504": 0,
+  "shed_429": 0,
+  "refused": 0,
+  "manifest": 1000,
+  "kill_at_fraction": 0.4,
+  "written_before_kill": 400,
+  "queue_depth_before_kill": 1000,
+  "staged_before_kill": 600,
+  "outstanding_at_kill": 1600,
+  "queue_depth_after_kill": 908,
+  "queue_depth_after_drain": 0,
+  "dead_letter_queue_depth": 0,
+  "post_restart_only": {
+    "skier_write_total": 772,
+    "skier_write_retries": 0,
+    "skier_write_dropped": 0,
+    "skier_write_requeued": 0,
+    "skier_cardinality_projection_unresolved": 0,
+    "skier_write_retry_handoff_failed": 0
+  }
+}

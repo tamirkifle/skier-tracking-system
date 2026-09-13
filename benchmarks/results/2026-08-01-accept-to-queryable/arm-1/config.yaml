@@ -1,0 +1,28 @@
+# Effective configuration, read from the running containers at the end of the run.
+probe: scripts/queryability.sh
+poll_interval_seconds: 0.25
+include_totals: 1
+cache_ttls_seconds:   # CacheConfig constants, not environment
+  skierDayVertical: 10
+  resortSkierCount: 30
+  skierResortTotals: 300
+resorts: {vertical: 1, count: [2, 3, 4]}
+server_env:
+  ADMISSION_INITIAL_CAPACITY=2000
+  ADMISSION_MAX_WAIT_MS=250
+  ADMISSION_MIN_RATE=100
+  QUEUE_MONITOR_DRAIN_RATE_WINDOW=10s
+  QUEUE_MONITOR_ENABLED=true
+  QUEUE_MONITOR_INTERVAL_MS=200
+  QUEUE_MONITOR_MAX_LATENCY=2500ms
+  QUEUE_MONITOR_MIN_LATENCY=1250ms
+  QUEUE_MONITOR_SETPOINT_MODE=depth
+  QUEUE_MONITOR_TARGET_LATENCY=1875ms
+consumer_env:
+  CARDINALITY_STRATEGY=dynamodb
+  CONSUMER_CONCURRENCY=16
+  CONSUMER_PREFETCH=200
+  WRITER_BATCH_SIZE=25
+  WRITER_LINGER_MS=20
+  WRITER_MODE=batch
+  WRITER_THREADS=8

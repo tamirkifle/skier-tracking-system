@@ -1,0 +1,30 @@
+{
+  "single": {
+    "mode": "single",
+    "run_position": 1,
+    "items_written": 13168,
+    "dynamodb_write_requests": 13168,
+    "items_per_request": 1.0,
+    "publish_seconds": 8.6,
+    "total_seconds_to_drained": 165.4,
+    "write_throughput_items_per_second": 79.6,
+    "first_sightings": 11940,
+    "duplicates_suppressed": 1228,
+    "first_sighting_share": 0.9067,
+    "cardinality_ops": 13168
+  },
+  "batch": {
+    "mode": "batch",
+    "run_position": 2,
+    "items_written": 13168,
+    "dynamodb_write_requests": 533,
+    "items_per_request": 24.71,
+    "publish_seconds": 8.3,
+    "total_seconds_to_drained": 142.7,
+    "write_throughput_items_per_second": 92.3,
+    "first_sightings": 12008,
+    "duplicates_suppressed": 1160,
+    "first_sighting_share": 0.9119,
+    "cardinality_ops": 13168
+  }
+}

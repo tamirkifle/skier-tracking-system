@@ -1,0 +1,15 @@
+accept-to-queryable, 2026-08-01T18:57:41Z, poll interval 0.25s
+
+arm                                  TTL   queryable   freshness  cache term
+vertical/first (fresh key)           10s       1.11s       0.948       0.165
+vertical/warm (read before write)    10s      10.32s       0.049      10.276
+vertical/cold (no read before)       10s      10.34s       0.081      10.259
+count/first (virgin resort-day)      30s       0.38s       0.126       0.251
+count/warm (read before write)       30s      30.13s       0.037      30.089
+count/cold (no read before)          30s      30.30s       0.099      30.203
+totals/first (fresh key)            300s       0.13s       0.081       0.050
+totals/warm (read before write)     300s     300.11s       0.042     300.071
+
+skierDayVertical: first 1.11s vs warm 10.32s against a configured TTL of 10s
+resortSkierCount: first 0.38s vs warm 30.13s against a configured TTL of 30s
+skierResortTotals: first 0.13s vs warm 300.11s against a configured TTL of 300s

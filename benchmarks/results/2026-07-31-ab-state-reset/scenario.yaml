@@ -1,0 +1,26 @@
+name: ab-writer
+description: >
+  Fixed event count used to A/B one axis of the consumer's configuration. Admission control is
+  disabled for this run so the events reach the queue; see scripts/ab.sh.
+workload:
+  skiers: 100000
+  resort-id: 5
+  season-id: 2025
+  day-id: 1
+  lifts: 40
+  minutes-in-ski-day: 360
+  seed: 20250421
+http:
+  max-connections: 400
+  max-connections-per-route: 200
+  max-retries: 2
+phases:
+  - name: warmup
+    mode: closed-loop
+    warmup: true
+    threads: 16
+    requests-per-thread: 50
+  - name: load
+    mode: closed-loop
+    threads: 64
+    requests-per-thread: 187
