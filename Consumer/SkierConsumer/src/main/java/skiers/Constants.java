@@ -1,5 +1,7 @@
 package skiers;
 
+import java.time.Duration;
+
 public final class Constants {
 
   private Constants() {}
@@ -12,6 +14,8 @@ public final class Constants {
   public static final String DEAD_LETTER_ROUTING_KEY = "dead.letter";
 
   public static final String LIFT_RIDES_TABLE = "LiftRides";
+  public static final String SKIER_COUNTS_TABLE = "SkierCounts";
+  public static final String SKIER_TRACKING_TABLE = "SkierTracking";
 
   public static final String ATTR_SKIER_ID = "skierID";
   public static final String ATTR_SORT_KEY = "resortID#seasonID#dayID#timestamp";
@@ -26,6 +30,12 @@ public final class Constants {
   public static final String ATTR_LIFT_ID = "liftID";
   public static final String ATTR_TIMESTAMP = "timestamp";
   public static final String ATTR_VERTICAL = "vertical";
+  public static final String ATTR_SKIER_KEY = "skierKey";
+  public static final String ATTR_UNIQUE_SKIER_COUNT = "uniqueSkierCount";
+
+  public static final String ATTR_EXPIRES_AT = "expiresAt";
+
+  public static final Duration SKIER_TRACKING_TTL = Duration.ofDays(180);
 
   public static final String HEADER_EVENT_ID = "x-event-id";
 
