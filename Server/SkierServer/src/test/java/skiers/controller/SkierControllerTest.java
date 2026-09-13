@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -114,6 +115,31 @@ class SkierControllerTest {
   }
 
   @Test
+  @DisplayName("an x-event-id outside the accepted shape is a 400, not a header echoed into logs")
+  void rejectsMalformedClientEventId() throws Exception {
+    admitAll();
+
+    mockMvc
+        .perform(
+            post(INGEST_PATH)
+                .header(Constants.HEADER_EVENT_ID, "ride 7f2c\nX-Injected: yes")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body(21, 217)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message").value("Invalid x-event-id"));
+
+    mockMvc
+        .perform(
+            post(INGEST_PATH)
+                .header(Constants.HEADER_EVENT_ID, "x".repeat(65))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body(21, 217)))
+        .andExpect(status().isBadRequest());
+
+    verify(publisher, never()).publish(any(), any(), anyLong());
+  }
+
+  @Test
   @DisplayName("the publish time handed to the publisher is sampled in the handler")
   void samplesPublishTimestampInTheHandler() throws Exception {
     admitAll();
@@ -169,5 +195,100 @@ class SkierControllerTest {
         .andExpect(status().isGatewayTimeout())
         .andExpect(header().exists(Constants.HEADER_EVENT_ID))
         .andExpect(jsonPath("$.message").value("Event outcome unknown"));
+  }
+
+  @Test
+  @DisplayName("body outside the documented domain is rejected with the offending fields named")
+  void rejectsOutOfRangeBody() throws Exception {
+    admitAll();
+
+    mockMvc
+        .perform(post(INGEST_PATH).contentType(MediaType.APPLICATION_JSON).content(body(999, 217)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.fields.liftID").exists());
+
+    mockMvc
+        .perform(post(INGEST_PATH).contentType(MediaType.APPLICATION_JSON).content(body(21, 0)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.fields.time").exists());
+
+    mockMvc
+        .perform(post(INGEST_PATH).contentType(MediaType.APPLICATION_JSON).content("{}"))
+        .andExpect(status().isBadRequest());
+
+    verify(publisher, never()).publish(any(), any(), anyLong());
+  }
+
+  @Test
+  @DisplayName("an out-of-domain dayID is rejected rather than stored unreachably")
+  void rejectsUnreachableDay() throws Exception {
+    admitAll();
+
+    mockMvc
+        .perform(
+            post("/skiers/5/seasons/2025/days/9999/skier/42")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body(21, 217)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message").value(Constants.INVALID_PATH_PARAMETERS));
+  }
+
+  @Test
+  @DisplayName("out-of-domain path parameters are rejected before a permit is spent")
+  void rejectsBadPathBeforeAdmission() throws Exception {
+    mockMvc
+        .perform(
+            post("/skiers/99/seasons/2025/days/1/skier/42")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body(21, 217)))
+        .andExpect(status().isBadRequest());
+
+    mockMvc
+        .perform(
+            post("/skiers/5/seasons/1999/days/1/skier/42")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body(21, 217)))
+        .andExpect(status().isBadRequest());
+
+    mockMvc
+        .perform(
+            post("/skiers/5/seasons/2025/days/1/skier/999999")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body(21, 217)))
+        .andExpect(status().isBadRequest());
+
+    verify(rateLimiter, never()).tryAcquire(anyLong());
+  }
+
+  @Test
+  @DisplayName("an unparseable body is a 400, not a 500")
+  void unparseableBodyIsNotAServerError() throws Exception {
+    admitAll();
+    mockMvc
+        .perform(post(INGEST_PATH).contentType(MediaType.APPLICATION_JSON).content("{not json"))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  @DisplayName("read endpoints validate their path parameters")
+  void readEndpointsValidate() throws Exception {
+    mockMvc
+        .perform(get("/skiers/5/seasons/2025/days/1/skiers/notanumber"))
+        .andExpect(status().isBadRequest());
+
+    mockMvc
+        .perform(get("/resorts/99/seasons/2025/day/1/skiers"))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  @DisplayName("a skier with no recorded vertical is a 404, not an empty 200")
+  void emptyResortTotalsIs404() throws Exception {
+    when(skierService.getSkierResortTotals("42", "5", null))
+        .thenReturn(Map.of("resorts", java.util.List.of()));
+
+    mockMvc
+        .perform(get("/skiers/42/vertical").param("resort", "5"))
+        .andExpect(status().isNotFound());
   }
 }
