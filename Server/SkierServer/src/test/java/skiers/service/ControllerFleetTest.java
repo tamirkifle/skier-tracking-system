@@ -152,6 +152,89 @@ class ControllerFleetTest {
     }
   }
 
+  private static Fleet coordinated(int instances, int initialRate) {
+    return new Fleet(instances, initialRate, () -> instances);
+  }
+
+  @Test
+  @DisplayName("a coordinated fleet's floor is the configured floor, not N times it")
+  void coordinatedFloorIsTheConfiguredFloor() {
+    for (int instances : new int[] {1, 2, 3, 5}) {
+      Fleet fleet = coordinated(instances, Constants.MAX_RATE);
+      for (int tick = 0; tick < 100; tick++) {
+        fleet.observeDepth(Constants.MAX_QUEUE_SIZE + 500);
+      }
+
+      assertThat(fleet.aggregateRate())
+          .as("aggregate floor with %d coordinated instance(s)", instances)
+          .isLessThanOrEqualTo(DEFAULT_FLOOR)
+          .isGreaterThan((long) DEFAULT_FLOOR - instances);
+    }
+  }
+
+  @Test
+  @DisplayName("a coordinated fleet surrenders one decrease step per tick, not N")
+  void coordinatedAdditiveDecreaseIsOneStep() {
+    for (int instances : new int[] {1, 2, 3, 5}) {
+      Fleet fleet = coordinated(instances, 4000);
+      long before = fleet.aggregateRate();
+
+      fleet.observeDepth(Constants.TARGET_QUEUE_SIZE + 1);
+
+      assertThat(before - fleet.aggregateRate())
+          .as(
+              "aggregate permits/s surrendered by %d coordinated instance(s) in one tick",
+              instances)
+          .isLessThanOrEqualTo(1000L)
+          .isGreaterThan(1000L - instances);
+    }
+  }
+
+  @Test
+  @DisplayName("a coordinated fleet reclaims one increase step per tick, not N")
+  void coordinatedAdditiveIncreaseIsOneStep() {
+    for (int instances : new int[] {1, 2, 5, 10}) {
+      Fleet fleet = coordinated(instances, 4000);
+      long before = fleet.aggregateRate();
+
+      fleet.observeDepth(Constants.MIN_QUEUE_SIZE - 1);
+
+      assertThat(fleet.aggregateRate() - before)
+          .as("aggregate permits/s reclaimed by %d coordinated instance(s) in one tick", instances)
+          .isLessThanOrEqualTo(10L)
+          .isGreaterThan(10L - instances);
+    }
+  }
+
+  @Test
+  @DisplayName("halving stays per-instance under coordination, because it is already correct")
+  void coordinatedMultiplicativeDecreaseIsStillScaleFree() {
+    for (int instances : new int[] {1, 2, 3, 5}) {
+      Fleet fleet = coordinated(instances, 4000);
+      long before = fleet.aggregateRate();
+
+      fleet.observeDepth(Constants.MAX_QUEUE_SIZE);
+
+      assertThat(fleet.aggregateRate())
+          .as("aggregate rate after one overload tick with %d coordinated instance(s)", instances)
+          .isEqualTo(before / 2);
+    }
+  }
+
+  @Test
+  @DisplayName("a fleet larger than the increase step can still recover")
+  void aFleetLargerThanTheIncreaseStepCanStillRecover() {
+    // 10 permits/s shared 50 ways truncates to 0, so share() floors the step at 1.
+    Fleet fleet = coordinated(50, 4000);
+    long before = fleet.aggregateRate();
+
+    fleet.observeDepth(Constants.MIN_QUEUE_SIZE - 1);
+
+    assertThat(fleet.aggregateRate() - before)
+        .as("a 50-instance fleet must still reclaim something")
+        .isPositive();
+  }
+
   private record Run(int instances, long admitted, long shed, int finalDepth, int peakDepth) {
 
     double shedFraction() {
