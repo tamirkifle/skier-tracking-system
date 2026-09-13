@@ -40,16 +40,9 @@ jobs:
           # credential introduced by an earlier one.
           fetch-depth: 0
 
-      # gitleaks-action derives its scan range from the push event's own `commits`
-      # array (baseRef = first listed commit, headRef = last), not from a real
-      # diff of the ref before/after the push, and GitHub caps that array at 20
-      # entries. This repo's `main` was seeded in a single 55-commit push, so the
-      # action's first-ever run scanned only the most recent 20 commits and missed
-      # every one of the seven that carry real (expired) credentials. Confirmed
-      # from that run's own log: `gitleaks cmd: ... a74858237^..09c3b5bcb2`, the
-      # commit that documents the leak, not the commits that contain it. Calling
-      # the CLI directly, exactly as `make secrets-scan` / ci-local.sh do, is the
-      # only way to make this job scan what its own comment above claims.
+      # gitleaks-action derives its scan range from the push event's `commits`
+      # array, which GitHub caps at 20 entries. Calling the CLI directly scans the
+      # full fetched history (`fetch-depth: 0`) and matches `make secrets-scan`.
       - name: Install gitleaks
         run: |
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
@@ -222,11 +215,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: promtool test rules
-        # The Prometheus rule tests, not the Java test suite. Fifteen alert rules exist and
-        # nothing else in CI evaluates any of them; two were already found wrong by hand (an
-        # unsatisfiable histogram_quantile, a rule duplicating a constant the code owns). Same
-        # image and same command as scripts/ci-local.sh, so a green run here is reproducible
-        # locally without installing promtool.
+        # Evaluates the Prometheus alert rules, which are not covered by the Java test
+        # suite. Uses the same image and command as scripts/ci-local.sh for local parity
+        # without requiring a local promtool binary.
         run: |
           docker run --rm -v "$PWD:/w" --entrypoint promtool prom/prometheus:v2.54.1 \
             test rules /w/Infra/observability/alerts.test.yml
