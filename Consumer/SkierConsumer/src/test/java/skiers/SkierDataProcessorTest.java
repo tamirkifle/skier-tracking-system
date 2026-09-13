@@ -181,6 +181,31 @@ class SkierDataProcessorTest {
   }
 
   @Test
+  @DisplayName(
+      "a full staging queue returns the event to the broker instead of blocking or dropping")
+  void appliesBackpressureWhenSaturated() {
+    build(1, 1, 0, 1, 3);
+    writer.blockWrites();
+
+    List<RecordingAck> acks = new ArrayList<>();
+    int rejected = 0;
+    for (int i = 0; i < 200; i++) {
+      RecordingAck ack = new RecordingAck();
+      acks.add(ack);
+      if (!processor.submit(event(i, 100 + i, ack))) {
+        rejected++;
+      }
+    }
+
+    assertThat(rejected).isPositive();
+    assertThat(acks.stream().mapToInt(RecordingAck::requeues).sum())
+        .as("every refused event must be handed back to the broker")
+        .isEqualTo(rejected);
+
+    writer.release();
+  }
+
+  @Test
   @DisplayName("a whole-request failure sends every event in the group to the delay route")
   void retriesOnWriteFailure() {
     build(1, 1, 0, 100, 3);
@@ -304,6 +329,41 @@ class SkierDataProcessorTest {
 
     await().atMost(Duration.ofSeconds(2)).until(() -> ack.acks() == 1);
     assertThat(writer.batches().get(0)).hasSize(1);
+  }
+
+  @Test
+  @DisplayName("shutdown drains staged events and returns anything unfinished to the broker")
+  void shutdownReturnsUnfinishedWork() {
+    build(1, 1, 0, 1000, 3);
+    writer.blockWrites();
+
+    List<RecordingAck> acks = new ArrayList<>();
+    for (int i = 0; i < 20; i++) {
+      RecordingAck ack = new RecordingAck();
+      acks.add(ack);
+      processor.submit(event(i, 100 + i, ack));
+    }
+
+    writer.release();
+    processor.shutdown();
+    processor = null;
+
+    assertThat(acks).allSatisfy(ack -> assertThat(ack.isSettled()).isTrue());
+    assertThat(acks.stream().mapToInt(a -> a.acks() + a.requeues() + a.deadLetters()).sum())
+        .isEqualTo(20);
+  }
+
+  @Test
+  @DisplayName("submitting after shutdown returns the event rather than accepting it")
+  void refusesSubmissionsAfterShutdown() {
+    build(1, 1, 0, 100, 3);
+    processor.shutdown();
+
+    RecordingAck ack = new RecordingAck();
+    assertThat(processor.submit(event(42, 100, ack))).isFalse();
+    assertThat(ack.requeues()).isEqualTo(1);
+
+    processor = null;
   }
 
   @Test
