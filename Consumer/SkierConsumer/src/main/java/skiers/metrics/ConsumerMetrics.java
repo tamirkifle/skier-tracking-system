@@ -11,6 +11,11 @@ import org.springframework.stereotype.Component;
 public class ConsumerMetrics {
 
   private final Counter written;
+  private final Counter projectionUnresolved;
+  private final Counter duplicateSuppressed;
+  private final Counter uniqueSkiersObserved;
+  private final Counter cardinalityWriteRequests;
+  private final Counter cardinalityWriteItems;
   private final Timer writeLatency;
   private final DistributionSummary batchSize;
 
@@ -18,6 +23,28 @@ public class ConsumerMetrics {
     this.written =
         Counter.builder("skier.write.total")
             .description("Lift-ride items durably persisted to DynamoDB")
+            .register(registry);
+    this.projectionUnresolved =
+        Counter.builder("skier.cardinality.projection.unresolved")
+            .description(
+                "Durable rides whose required unique-skier update failed, so the delivery was not "
+                    + "settled")
+            .register(registry);
+    this.duplicateSuppressed =
+        Counter.builder("skier.cardinality.duplicate.suppressed")
+            .description("Redeliveries recognised as already-counted skier sightings")
+            .register(registry);
+    this.uniqueSkiersObserved =
+        Counter.builder("skier.cardinality.unique.observed")
+            .description("First sightings of a skier at a resort on a day")
+            .register(registry);
+    this.cardinalityWriteRequests =
+        Counter.builder("skier.cardinality.write.requests")
+            .description("DynamoDB write requests issued by the cardinality strategy")
+            .register(registry);
+    this.cardinalityWriteItems =
+        Counter.builder("skier.cardinality.write.items")
+            .description("DynamoDB items written by the cardinality strategy")
             .register(registry);
     this.writeLatency =
         Timer.builder("skier.write.latency")
@@ -34,6 +61,27 @@ public class ConsumerMetrics {
     written.increment(items);
     batchSize.record(items);
     writeLatency.record(nanos, java.util.concurrent.TimeUnit.NANOSECONDS);
+  }
+
+  public void recordProjectionUnresolved() {
+    projectionUnresolved.increment();
+  }
+
+  public void recordUniqueSkier() {
+    uniqueSkiersObserved.increment();
+  }
+
+  public void recordDuplicateSuppressed() {
+    duplicateSuppressed.increment();
+  }
+
+  public void recordCardinalityWriteItems(int items) {
+    cardinalityWriteItems.increment(items);
+  }
+
+  /** Counts requests issued: a conditional write that loses its condition is still billed. */
+  public void recordCardinalityWriteRequest() {
+    cardinalityWriteRequests.increment();
   }
 
   public long writtenCount() {
