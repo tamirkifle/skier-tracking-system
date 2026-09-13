@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+  external_labels:
+    system: skier-tracking
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: skier-server
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["server:8080"]
+        labels:
+          service: server
+
+  - job_name: skier-consumer
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["consumer:8085"]
+        labels:
+          service: consumer
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
