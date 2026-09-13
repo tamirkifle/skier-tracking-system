@@ -26,6 +26,33 @@ build: ## Compile and package every module
 test: ## Run the unit suite (no Docker required)
 	$(MVN) -B test
 
+.PHONY: it
+it: ## Run the container-backed integration suite (requires Docker)
+	$(MVN) -B -Pintegration verify -DfailIfNoTests=false
+
+# Reuse is opt-in per invocation and never on by default, so `make it`, `make verify`, `make
+# ci-local` and CI all keep starting from cold containers. Testcontainers' own opt-in is
+# ~/.testcontainers.properties, a file outside the repository, which makes "does this machine
+# reuse?" invisible to everyone reading the build. TESTCONTAINERS_REUSE_ENABLE is the same switch
+# read from the environment, so the decision lives here where it can be reviewed.
+#
+# The containers survive the JVM: Testcontainers excludes reusable containers from Ryuk's reaping,
+# by design. `make it-reuse-stop` is how you get back to cold, and you must run it after changing
+# anything the containers' state depends on.
+.PHONY: it-reuse
+it-reuse: export TESTCONTAINERS_REUSE_ENABLE=true
+it-reuse: ## Integration suite against reusable containers (fast re-runs; leaves them running)
+	$(MVN) -B -Pintegration verify -DfailIfNoTests=false
+
+.PHONY: it-reuse-stop
+it-reuse-stop: ## Remove the containers `make it-reuse` left running
+	@ids=$$(docker ps -aq --filter 'label=org.testcontainers.hash'); \
+	if [ -n "$$ids" ]; then docker rm -f $$ids; else echo "no reusable containers"; fi
+
+.PHONY: verify
+verify: ## Unit tests + coverage gate + integration tests
+	$(MVN) -B -Pintegration,coverage-gate verify
+
 .PHONY: format
 format: ## Apply google-java-format to every module
 	$(MVN) -B spotless:apply
