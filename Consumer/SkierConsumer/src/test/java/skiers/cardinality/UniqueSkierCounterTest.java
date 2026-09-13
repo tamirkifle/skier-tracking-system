@@ -3,12 +3,15 @@ package skiers.cardinality;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,18 +19,23 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.data.redis.core.HyperLogLogOperations;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import skiers.Constants;
 import skiers.ingest.DeliveryAck;
 import skiers.metrics.ConsumerMetrics;
 import skiers.model.LiftRideEvent;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.CancellationReason;
+import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 import software.amazon.awssdk.services.dynamodb.model.Put;
 import software.amazon.awssdk.services.dynamodb.model.TransactWriteItem;
 import software.amazon.awssdk.services.dynamodb.model.TransactWriteItemsRequest;
 import software.amazon.awssdk.services.dynamodb.model.TransactWriteItemsResponse;
 import software.amazon.awssdk.services.dynamodb.model.TransactionCanceledException;
 import software.amazon.awssdk.services.dynamodb.model.Update;
+import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.UpdateItemResponse;
 
 class UniqueSkierCounterTest {
 
@@ -210,6 +218,173 @@ class UniqueSkierCounterTest {
           .extracting(
               value -> value.transactItems().get(0).put().item().get(Constants.ATTR_SKIER_KEY).s())
           .containsExactly("5#2025#1#42", "7#2025#1#42");
+    }
+  }
+
+  @Nested
+  @DisplayName("Redis HyperLogLog")
+  class HyperLogLog {
+
+    private HyperLogLogOperations<String, String> hll;
+    private StringRedisTemplate redis;
+    private DynamoDbClient dynamoDb;
+    private RedisHyperLogLogCounter counter;
+
+    @SuppressWarnings("unchecked")
+    @BeforeEach
+    void setUp() {
+      redis = mock(StringRedisTemplate.class);
+      hll = mock(HyperLogLogOperations.class);
+      dynamoDb = mock(DynamoDbClient.class);
+      when(redis.opsForHyperLogLog()).thenReturn(hll);
+      counter = new RedisHyperLogLogCounter(redis, dynamoDb, metrics);
+    }
+
+    @Test
+    @DisplayName("PFADD reporting a change counts as a first sighting")
+    void reportsFirstSighting() {
+      when(hll.add(anyString(), any(String[].class))).thenReturn(1L);
+
+      assertThat(counter.observe(event("42"))).isTrue();
+      verify(hll).add("skiers:hll:5#2025#1", "42");
+      verify(redis).expire(anyString(), any(Duration.class));
+    }
+
+    @Test
+    @DisplayName("PFADD reporting no change is a repeat sighting and does not refresh the TTL")
+    void suppressesRepeatSighting() {
+      when(hll.add(anyString(), any(String[].class))).thenReturn(0L);
+
+      assertThat(counter.observe(event("42"))).isFalse();
+      verify(redis, never()).expire(anyString(), any(Duration.class));
+    }
+
+    @Test
+    @DisplayName("re-adding an identity cannot move the estimate")
+    void isStructurallyIdempotent() {
+      when(hll.add(anyString(), any(String[].class))).thenReturn(1L).thenReturn(0L);
+
+      LiftRideEvent redelivered = event("42");
+      assertThat(counter.observe(redelivered)).isTrue();
+      assertThat(counter.observe(redelivered)).isFalse();
+    }
+
+    @Test
+    @DisplayName("a Redis outage degrades the statistic rather than failing the event")
+    void survivesRedisOutage() {
+      when(hll.add(anyString(), any(String[].class)))
+          .thenThrow(new org.springframework.dao.QueryTimeoutException("redis down"));
+
+      assertThat(counter.observe(event("42"))).isFalse();
+    }
+
+    @Test
+    @DisplayName("estimate reads the sketch for the requested resort-day")
+    void readsEstimate() {
+      when(hll.size("skiers:hll:5#2025#1")).thenReturn(98765L);
+      assertThat(counter.estimate("5#2025#1")).isEqualTo(98765L);
+    }
+
+    @Test
+    @DisplayName("a missing sketch estimates zero")
+    void missingSketchIsZero() {
+      when(hll.size(anyString())).thenReturn(null);
+      assertThat(counter.estimate("5#2025#1")).isZero();
+    }
+
+    @Test
+    @DisplayName("cardinality growth publishes PFCOUNT to the row the read API serves")
+    void mirrorsEstimateToSkierCounts() {
+      when(hll.add(anyString(), any(String[].class))).thenReturn(1L);
+      when(hll.size("skiers:hll:5#2025#1")).thenReturn(4321L);
+      when(dynamoDb.updateItem(any(UpdateItemRequest.class)))
+          .thenReturn(UpdateItemResponse.builder().build());
+
+      assertThat(counter.observe(event("42"))).isTrue();
+
+      ArgumentCaptor<UpdateItemRequest> update = ArgumentCaptor.forClass(UpdateItemRequest.class);
+      verify(dynamoDb).updateItem(update.capture());
+      assertThat(update.getValue().tableName()).isEqualTo(Constants.SKIER_COUNTS_TABLE);
+      assertThat(update.getValue().key().get(Constants.ATTR_RESORT_SEASON_DAY).s())
+          .isEqualTo("5#2025#1");
+      // SET, not ADD: the sketch already holds the whole count.
+      assertThat(update.getValue().updateExpression())
+          .isEqualTo("SET " + Constants.ATTR_UNIQUE_SKIER_COUNT + " = :estimate");
+      assertThat(update.getValue().expressionAttributeValues().get(":estimate").n())
+          .isEqualTo("4321");
+      assertThat(update.getValue().conditionExpression())
+          .isEqualTo("attribute_not_exists(uniqueSkierCount) OR uniqueSkierCount < :estimate");
+    }
+
+    @Test
+    @DisplayName("a repeat sighting does not touch DynamoDB at all")
+    void repeatSightingDoesNotMirror() {
+      when(hll.add(anyString(), any(String[].class))).thenReturn(0L);
+
+      assertThat(counter.observe(event("42"))).isFalse();
+
+      verify(dynamoDb, never()).updateItem(any(UpdateItemRequest.class));
+    }
+
+    @Test
+    @DisplayName("the mirror is counted as one DynamoDB write request, and a repeat costs none")
+    void mirrorIsCountedAsAWriteRequest() {
+      when(hll.add(anyString(), any(String[].class))).thenReturn(1L).thenReturn(0L);
+      when(hll.size(anyString())).thenReturn(4321L);
+      when(dynamoDb.updateItem(any(UpdateItemRequest.class)))
+          .thenReturn(UpdateItemResponse.builder().build());
+
+      LiftRideEvent redelivered = event("42");
+      counter.observe(redelivered);
+      counter.observe(redelivered);
+
+      assertThat(cardinalityWriteRequests()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("a mirror that loses its condition still cost a write request")
+    void mirrorRejectedByTheConditionIsStillCounted() {
+      when(hll.add(anyString(), any(String[].class))).thenReturn(1L);
+      when(hll.size(anyString())).thenReturn(10L);
+      when(dynamoDb.updateItem(any(UpdateItemRequest.class)))
+          .thenThrow(ConditionalCheckFailedException.builder().message("already ahead").build());
+
+      counter.observe(event("42"));
+
+      assertThat(cardinalityWriteRequests()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("a Redis outage costs no DynamoDB write request")
+    void redisOutageIssuesNoWrite() {
+      when(hll.add(anyString(), any(String[].class)))
+          .thenThrow(new org.springframework.dao.QueryTimeoutException("redis down"));
+
+      counter.observe(event("42"));
+
+      assertThat(cardinalityWriteRequests()).isZero();
+    }
+
+    @Test
+    @DisplayName("losing the monotone condition to a concurrent instance is not an error")
+    void concurrentLargerEstimateWins() {
+      when(hll.add(anyString(), any(String[].class))).thenReturn(1L);
+      when(hll.size(anyString())).thenReturn(10L);
+      when(dynamoDb.updateItem(any(UpdateItemRequest.class)))
+          .thenThrow(ConditionalCheckFailedException.builder().message("already ahead").build());
+
+      assertThat(counter.observe(event("42"))).isTrue();
+    }
+
+    @Test
+    @DisplayName("a mirror failure degrades the published count rather than the sighting answer")
+    void mirrorFailureDoesNotChangeTheFirstSightingAnswer() {
+      when(hll.add(anyString(), any(String[].class))).thenReturn(1L);
+      when(hll.size(anyString())).thenReturn(10L);
+      when(dynamoDb.updateItem(any(UpdateItemRequest.class)))
+          .thenThrow(new IllegalStateException("dynamo down"));
+
+      assertThat(counter.observe(event("42"))).isTrue();
     }
   }
 }
