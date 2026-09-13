@@ -17,6 +17,12 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
+# --- Start here ------------------------------------------------------------------------------
+
+.PHONY: preflight
+preflight: ## Prove the toolchain, Docker transport and ports are usable (~2s)
+	@bash scripts/preflight.sh
+
 # --- Build -----------------------------------------------------------------------------------
 
 .PHONY: build
