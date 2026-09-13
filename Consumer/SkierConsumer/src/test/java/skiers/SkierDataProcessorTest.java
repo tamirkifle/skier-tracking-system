@@ -142,6 +142,42 @@ class SkierDataProcessorTest {
   }
 
   @Test
+  @DisplayName("events are coalesced into groups up to the configured batch size")
+  void coalescesIntoBatches() {
+    build(1, 10, 200, 1000, 3);
+    CountDownLatch gate = writer.blockWrites();
+
+    List<RecordingAck> acks = new ArrayList<>();
+    for (int i = 0; i < 10; i++) {
+      RecordingAck ack = new RecordingAck();
+      acks.add(ack);
+      processor.submit(event(i, 100 + i, ack));
+    }
+
+    gate.countDown();
+    writer.release();
+
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .until(() -> acks.stream().mapToInt(RecordingAck::acks).sum() == 10);
+
+    assertThat(writer.writeCallCount()).isLessThan(10);
+    assertThat(writer.itemsSeen()).isEqualTo(10);
+  }
+
+  @Test
+  @DisplayName("the linger window bounds how long a partial group waits")
+  void flushesPartialBatchAfterLinger() {
+    build(1, 25, 30, 1000, 3);
+
+    RecordingAck ack = new RecordingAck();
+    processor.submit(event(42, 100, ack));
+
+    await().atMost(Duration.ofSeconds(2)).until(() -> ack.acks() == 1);
+    assertThat(writer.batches().get(0)).hasSize(1);
+  }
+
+  @Test
   @DisplayName("concurrent writers settle every event exactly once")
   void settlesEveryEventExactlyOnceUnderConcurrency() {
     build(8, 5, 10, 5000, 3);
