@@ -174,6 +174,61 @@ class RateLimiterTest {
   }
 
   @Test
+  @DisplayName("a refill loop that runs late loses every permit beyond one bucket depth")
+  void catchUpBurstDiscardsTheArrears() {
+    RateLimiter rateLimiter = buildUnarmed(DEFAULT_FLOOR, 10);
+    assertThat(rateLimiter.availableTokens()).isZero();
+
+    for (int tick = 0; tick < 2 * DEFAULT_FLOOR; tick++) {
+      rateLimiter.refill();
+    }
+
+    assertThat(rateLimiter.availableTokens())
+        .as("one second of arrears is all a bucket one second deep can hold")
+        .isEqualTo(DEFAULT_FLOOR);
+    assertThat(rateLimiter.permitsDiscardedCount())
+        .as("the other second, which the achieved rate loses and the rate gauge does not show")
+        .isEqualTo(DEFAULT_FLOOR);
+  }
+
+  @Test
+  @DisplayName("every permit the refill budget produced is granted, held, or counted as discarded")
+  void refillAccountsForEveryPermitItsBudgetProduced() {
+    int capacity = 150;
+    int ticks = 2;
+    long budget = (long) capacity * ticks * 2;
+    RateLimiter rateLimiter = buildUnarmed(capacity, 2000);
+    assertThat(rateLimiter.availableTokens()).isZero();
+
+    for (int tick = 0; tick < ticks; tick++) {
+      rateLimiter.refill();
+    }
+    int drained = 0;
+    while (rateLimiter.tryAcquire()) {
+      drained++;
+    }
+
+    assertThat(drained + rateLimiter.permitsDiscardedCount())
+        .as("%d two-second ticks at %d permits/s is a budget of %d", ticks, capacity, budget)
+        .isEqualTo(budget);
+  }
+
+  @Test
+  @DisplayName("the refill loop reports its own invocation count and worst lateness")
+  void refillLatenessIsObservable() throws Exception {
+    RateLimiter rateLimiter = buildUnarmed(DEFAULT_FLOOR, 10);
+
+    rateLimiter.refill();
+    TimeUnit.MILLISECONDS.sleep(60);
+    rateLimiter.refill();
+
+    assertThat(rateLimiter.refillInvocations()).isEqualTo(2);
+    assertThat(rateLimiter.refillMaxGapSeconds())
+        .as("a 60ms sleep between two invocations is a 60ms gap")
+        .isGreaterThanOrEqualTo(0.05);
+  }
+
+  @Test
   @DisplayName("shrinking the rate also shrinks permits already in the bucket")
   void shrinkingRateTrimsTheBucket() {
     RateLimiter rateLimiter = build(Constants.MAX_RATE, 600_000, 0);
