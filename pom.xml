@@ -43,14 +43,26 @@
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
     <!-- Runtime libraries not managed by spring-boot-starter-parent -->
+    <!-- v1 is gone. Reintroducing it means reintroducing an unsupported SDK. -->
     <aws.sdk.v2.version>2.28.29</aws.sdk.v2.version>
     <resilience4j.version>2.2.0</resilience4j.version>
     <hdrhistogram.version>2.2.2</hdrhistogram.version>
     <httpasyncclient.version>4.1.5</httpasyncclient.version>
     <httpcore.version>4.4.16</httpcore.version>
     <testcontainers.version>1.20.3</testcontainers.version>
+
+    <!-- Build plugins -->
+    <jacoco.version>0.8.12</jacoco.version>
     <spotless.version>2.43.0</spotless.version>
     <surefire.version>3.2.5</surefire.version>
+
+    <!--
+      Coverage floor. Deliberately module-overridable: the load generator is dominated by
+      network I/O that unit tests cannot reach, so it carries a lower bar than the services.
+    -->
+    <jacoco.line.coverage>0.60</jacoco.line.coverage>
+
+    <!-- See the `integration` profile for why this is pinned. Override with -Ddocker.api.version=. -->
     <docker.api.version>1.44</docker.api.version>
   </properties>
 
@@ -77,6 +89,7 @@
         <type>pom</type>
         <scope>import</scope>
       </dependency>
+
       <dependency>
         <groupId>org.hdrhistogram</groupId>
         <artifactId>HdrHistogram</artifactId>
@@ -113,6 +126,11 @@
           </configuration>
         </plugin>
         <plugin>
+          <groupId>org.jacoco</groupId>
+          <artifactId>jacoco-maven-plugin</artifactId>
+          <version>${jacoco.version}</version>
+        </plugin>
+        <plugin>
           <groupId>com.diffplug.spotless</groupId>
           <artifactId>spotless-maven-plugin</artifactId>
           <version>${spotless.version}</version>
@@ -136,10 +154,33 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
       </plugin>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
   </build>
 
   <profiles>
+    <!--
+      Docker-backed tests (LocalStack DynamoDB, RabbitMQ, Redis). Split out so a laptop or CI
+      runner without a Docker daemon can still run the full unit suite.
+    -->
     <profile>
       <id>integration</id>
       <build>
@@ -150,9 +191,55 @@
             <configuration>
               <excludedGroups combine.self="override"/>
               <systemPropertyVariables>
+                <!--
+                  Pins the Docker Engine API version docker-java negotiates.
+
+                  Testcontainers 1.20.3 ships docker-java 3.4.0, which defaults to an API version
+                  Docker Engine 29 no longer serves: every request comes back HTTP 400 with an
+                  effectively empty payload, and Testcontainers surfaces that as the far less
+                  obvious "Could not find a valid Docker environment", even though the socket is
+                  reachable and the `docker` CLI works fine against it. 1.44 is the floor Engine 25+
+                  supports, so this is compatible with every daemon this project is likely to meet.
+                -->
                 <api.version>${docker.api.version}</api.version>
               </systemPropertyVariables>
             </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <!-- Enforces the coverage floor. Kept off the default build so `mvn test` stays fast. -->
+    <profile>
+      <id>coverage-gate</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.jacoco</groupId>
+            <artifactId>jacoco-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>check</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>check</goal>
+                </goals>
+                <configuration>
+                  <rules>
+                    <rule>
+                      <element>BUNDLE</element>
+                      <limits>
+                        <limit>
+                          <counter>LINE</counter>
+                          <value>COVEREDRATIO</value>
+                          <minimum>${jacoco.line.coverage}</minimum>
+                        </limit>
+                      </limits>
+                    </rule>
+                  </rules>
+                </configuration>
+              </execution>
+            </executions>
           </plugin>
         </plugins>
       </build>

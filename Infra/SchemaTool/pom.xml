@@ -20,6 +20,11 @@
     tests and run as a CLI by docker compose and by deployment.
   </description>
 
+  <properties>
+    <!-- Exercised end to end against LocalStack by the integration suite rather than mocked. -->
+    <jacoco.line.coverage>0.30</jacoco.line.coverage>
+  </properties>
+
   <dependencies>
     <dependency>
       <groupId>software.amazon.awssdk</groupId>

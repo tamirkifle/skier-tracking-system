@@ -63,6 +63,12 @@ it-reuse-stop: ## Remove the containers `make it-reuse` left running
 verify: ## Unit tests + coverage gate + integration tests
 	$(MVN) -B -Pintegration,coverage-gate verify
 
+.PHONY: coverage
+coverage: ## Produce JaCoCo HTML reports
+	$(MVN) -B verify -Pcoverage-gate
+	@echo "Reports:"
+	@ls -d */*/target/site/jacoco 2>/dev/null || true
+
 .PHONY: format
 format: ## Apply google-java-format to every module
 	$(MVN) -B spotless:apply
