@@ -2,9 +2,14 @@ package skiers.metrics;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntSupplier;
 import org.springframework.stereotype.Component;
 
 /** Consumer-side instrumentation, exported over {@code /actuator/prometheus}. */
@@ -26,6 +31,9 @@ public class ConsumerMetrics {
   private final Timer writeLatency;
   private final Timer freshness;
   private final DistributionSummary batchSize;
+  private final AtomicInteger pendingWrites = new AtomicInteger();
+
+  private final List<IntSupplier> boundGauges = new CopyOnWriteArrayList<>();
 
   public ConsumerMetrics(MeterRegistry registry) {
     this.written =
@@ -95,6 +103,18 @@ public class ConsumerMetrics {
         DistributionSummary.builder("skier.write.batch.size")
             .description("Items per DynamoDB write request")
             .register(registry);
+
+    Gauge.builder("skier.write.queue.depth", pendingWrites, AtomicInteger::get)
+        .description("Events buffered in the writer queue awaiting persistence")
+        .register(registry);
+  }
+
+  /** Retains the supplier: Micrometer holds a gauge source weakly, and a collected one is NaN. */
+  public void bindQueueDepth(MeterRegistry registry, String name, IntSupplier depth) {
+    boundGauges.add(depth);
+    Gauge.builder(name, depth, IntSupplier::getAsInt)
+        .description("Events buffered at this stage of the write path")
+        .register(registry);
   }
 
   public void recordWritten(int items, long nanos) {
@@ -152,6 +172,10 @@ public class ConsumerMetrics {
   /** Counts requests issued: a conditional write that loses its condition is still billed. */
   public void recordCardinalityWriteRequest() {
     cardinalityWriteRequests.increment();
+  }
+
+  public void queueDepth(int depth) {
+    pendingWrites.set(depth);
   }
 
   public long writtenCount() {

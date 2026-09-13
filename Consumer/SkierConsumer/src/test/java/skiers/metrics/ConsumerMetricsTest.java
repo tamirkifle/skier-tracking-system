@@ -5,10 +5,30 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class ConsumerMetricsTest {
+
+  @Test
+  @DisplayName("a bound depth gauge keeps reporting after the caller's reference is gone")
+  void boundGaugeSurvivesGarbageCollection() {
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    ConsumerMetrics metrics = new ConsumerMetrics(registry);
+
+    AtomicInteger source = new AtomicInteger(7);
+    metrics.bindQueueDepth(registry, "test.depth", source::get);
+
+    // Micrometer holds gauge sources weakly, so an unreferenced supplier reads NaN.
+    System.gc();
+    System.gc();
+
+    assertThat(registry.get("test.depth").gauge().value()).isEqualTo(7.0);
+
+    source.set(42);
+    assertThat(registry.get("test.depth").gauge().value()).isEqualTo(42.0);
+  }
 
   @Test
   @DisplayName("write outcomes are counted separately")
