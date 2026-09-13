@@ -11,6 +11,8 @@ public class SkierProperties {
 
   @NestedConfigurationProperty private final Ingest ingest = new Ingest();
 
+  @NestedConfigurationProperty private final QueueMonitor queueMonitor = new QueueMonitor();
+
   @NestedConfigurationProperty private final Cache cache = new Cache();
 
   public Admission getAdmission() {
@@ -42,6 +44,10 @@ public class SkierProperties {
     public void setMaxEventIdLength(int maxEventIdLength) {
       this.maxEventIdLength = maxEventIdLength;
     }
+  }
+
+  public QueueMonitor getQueueMonitor() {
+    return queueMonitor;
   }
 
   public Cache getCache() {
@@ -99,6 +105,85 @@ public class SkierProperties {
 
     public void setWaitSliceMs(long waitSliceMs) {
       this.waitSliceMs = waitSliceMs;
+    }
+  }
+
+  public enum SetpointMode {
+    DEPTH,
+
+    LATENCY
+  }
+
+  public static class QueueMonitor {
+    private boolean enabled = true;
+
+    private long intervalMs = 200;
+
+    private SetpointMode setpointMode = SetpointMode.DEPTH;
+
+    /** The 150-message setpoint divided by a drain rate of 80 events/s. */
+    private Duration targetLatency = Duration.ofMillis(1875);
+
+    private Duration maxLatency = Duration.ofMillis(2500);
+
+    private Duration minLatency = Duration.ofMillis(1250);
+
+    private Duration drainRateWindow = Duration.ofMillis(10000);
+
+    public boolean isEnabled() {
+      return enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+      this.enabled = enabled;
+    }
+
+    public long getIntervalMs() {
+      return intervalMs;
+    }
+
+    public void setIntervalMs(long intervalMs) {
+      this.intervalMs = intervalMs;
+    }
+
+    public SetpointMode getSetpointMode() {
+      return setpointMode;
+    }
+
+    public void setSetpointMode(SetpointMode setpointMode) {
+      this.setpointMode = setpointMode;
+    }
+
+    public Duration getTargetLatency() {
+      return targetLatency;
+    }
+
+    public void setTargetLatency(Duration targetLatency) {
+      this.targetLatency = targetLatency;
+    }
+
+    public Duration getMaxLatency() {
+      return maxLatency;
+    }
+
+    public void setMaxLatency(Duration maxLatency) {
+      this.maxLatency = maxLatency;
+    }
+
+    public Duration getMinLatency() {
+      return minLatency;
+    }
+
+    public void setMinLatency(Duration minLatency) {
+      this.minLatency = minLatency;
+    }
+
+    public Duration getDrainRateWindow() {
+      return drainRateWindow;
+    }
+
+    public void setDrainRateWindow(Duration drainRateWindow) {
+      this.drainRateWindow = drainRateWindow;
     }
   }
 
