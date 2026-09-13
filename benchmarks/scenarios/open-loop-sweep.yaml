@@ -1,0 +1,69 @@
+# Steps the arrival rate up until the server stops keeping pace.
+#
+# This is the scenario that answers "what can it actually take?", because an
+# open-loop generator does not slow down when the server does. A closed-loop run
+# cannot answer that question at all: as latency rises it issues fewer requests,
+# so offered load silently tracks capacity and the run always looks survivable.
+#
+# Read the results by finding the first step where p99 departs from the earlier
+# steps' trend, or where arrival-rate attainment drops below ~98%. That step is
+# the knee, and the step before it is the sustainable rate.
+name: open-loop-sweep
+description: >
+  Fixed-arrival-rate steps from 500 to 6,000 requests/second, 30 seconds each.
+  Latency is charged from each request's scheduled due time, so a client-side
+  backlog is measured rather than hidden. Locate the knee, then read the
+  admission-rate and queue-depth panels in Grafana for the same window to see
+  which component became the constraint.
+
+workload:
+  skiers: 100000
+  resort-id: 5
+  season-id: 2025
+  day-id: 1
+  lifts: 40
+  minutes-in-ski-day: 360
+  seed: 20250421
+
+http:
+  max-connections: 2000
+  max-connections-per-route: 1000
+  connect-timeout-ms: 5000
+  socket-timeout-ms: 10000
+  # Deliberately lower than the baseline scenario: retries add offered load the
+  # schedule did not ask for, which muddies the relationship between the target
+  # rate and what the server actually received.
+  max-retries: 1
+  retry-base-backoff-ms: 25
+
+phases:
+  - name: warmup
+    mode: open-loop
+    warmup: true
+    target-rate-per-second: 200
+    duration-seconds: 10
+
+  - name: 500-rps
+    mode: open-loop
+    target-rate-per-second: 500
+    duration-seconds: 30
+
+  - name: 1000-rps
+    mode: open-loop
+    target-rate-per-second: 1000
+    duration-seconds: 30
+
+  - name: 2000-rps
+    mode: open-loop
+    target-rate-per-second: 2000
+    duration-seconds: 30
+
+  - name: 4000-rps
+    mode: open-loop
+    target-rate-per-second: 4000
+    duration-seconds: 30
+
+  - name: 6000-rps
+    mode: open-loop
+    target-rate-per-second: 6000
+    duration-seconds: 30

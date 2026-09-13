@@ -136,4 +136,20 @@ class ScenarioLoaderTest {
         """;
     assertThat(ScenarioLoader.parse(yaml).getName()).isEqualTo("forward-compatible");
   }
+
+  @Test
+  @DisplayName("every committed scenario file is valid")
+  void committedScenariosAreValid() throws IOException {
+    java.nio.file.Path dir = java.nio.file.Path.of("..", "..", "benchmarks", "scenarios");
+    if (!java.nio.file.Files.isDirectory(dir)) {
+      return;
+    }
+    try (var files = java.nio.file.Files.list(dir)) {
+      for (java.nio.file.Path file : files.filter(p -> p.toString().endsWith(".yaml")).toList()) {
+        Scenario scenario = ScenarioLoader.load(file);
+        assertThat(scenario.getPhases()).as("%s declares phases", file).isNotEmpty();
+        assertThat(scenario.measuredRequests()).as("%s measures something", file).isPositive();
+      }
+    }
+  }
 }

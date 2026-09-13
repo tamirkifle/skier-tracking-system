@@ -1,0 +1,29 @@
+# A 2,000-request run for checking the harness itself works before spending four
+# minutes on a real measurement.
+name: smoke
+description: A short run used to validate the harness and the target wiring.
+
+workload:
+  skiers: 1000
+  resort-id: 5
+  season-id: 2025
+  day-id: 1
+  lifts: 40
+  minutes-in-ski-day: 360
+
+http:
+  max-connections: 100
+  max-connections-per-route: 50
+  max-retries: 2
+
+phases:
+  - name: warmup
+    mode: closed-loop
+    warmup: true
+    threads: 4
+    requests-per-thread: 25
+
+  - name: steady
+    mode: closed-loop
+    threads: 20
+    requests-per-thread: 100

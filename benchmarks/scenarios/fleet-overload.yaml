@@ -1,0 +1,51 @@
+# Sustained overload against a replicated server, with the queue-depth controller ENABLED.
+#
+# The question is not throughput. It is what N independent controllers do to *aggregate* admission
+# when they all steer against one shared queue, specifically the floor branch, which
+# `ControllerFleetTest` measured as scaling by exactly N in a JVM-level simulation and which nothing
+# had ever run live (L7 stage 1, defect #33).
+#
+# Open-loop rather than closed-loop, and that is the load-shape decision this scenario exists to
+# make. A closed-loop generator slows down when the server sheds, so offered load silently tracks
+# whatever the fleet admits, which is the exact quantity under measurement, and the run would
+# report it back as its own input. A fixed arrival rate makes offered load a constant the fleet size
+# cannot influence.
+#
+# `max-retries: 0` for the same reason: a retried 429 is a second arrival caused by the server's
+# answer, so retries make the arrival process a function of the admission rate too.
+name: fleet-overload
+description: >
+  Fixed 800 requests/second for 150 seconds against every replica in turn, offered well above what
+  any fleet size here can admit. Run by scripts/fleet.sh, which samples each replica's own scrape
+  and reports per-instance and aggregate admission.
+
+workload:
+  skiers: 100000
+  resort-id: 5
+  season-id: 2025
+  day-id: 1
+  lifts: 40
+  minutes-in-ski-day: 360
+  seed: 20250421
+
+http:
+  max-connections: 800
+  max-connections-per-route: 400
+  connect-timeout-ms: 5000
+  socket-timeout-ms: 10000
+  max-retries: 0
+
+phases:
+  # Small, and excluded from the report: the first requests measure a cold connection pool and an
+  # empty JIT profile. It also gives the controller its first few ticks, so the measured phase does
+  # not start with the rate still walking down from ADMISSION_INITIAL_CAPACITY.
+  - name: warmup
+    mode: closed-loop
+    warmup: true
+    threads: 16
+    requests-per-thread: 50
+
+  - name: overload
+    mode: open-loop
+    target-rate-per-second: 800
+    duration-seconds: 150

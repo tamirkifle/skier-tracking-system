@@ -1,0 +1,45 @@
+# The closed-loop shape: a smaller first phase, then the bulk of the load. Both
+# phases hold one worker per in-flight request, so see the Mode javadoc for why
+# that model flatters the tail.
+name: closed-loop-200k
+description: >
+  200,000 lift-ride POSTs in two closed-loop phases. open-loop-sweep.yaml is
+  the measurement to trust for tail latency.
+
+workload:
+  skiers: 100000
+  resort-id: 5
+  season-id: 2025
+  day-id: 1
+  lifts: 40
+  minutes-in-ski-day: 360
+  seed: 20250421
+
+http:
+  max-connections: 1000
+  max-connections-per-route: 500
+  connect-timeout-ms: 5000
+  socket-timeout-ms: 10000
+  max-retries: 3
+  retry-base-backoff-ms: 50
+
+phases:
+  # Excluded from results. The first few thousand requests measure interpreted
+  # bytecode, a cold connection pool and an empty JIT profile, including them
+  # does not make the measurement more honest, it makes it wrong by an amount
+  # nobody can quantify afterwards.
+  - name: warmup
+    mode: closed-loop
+    warmup: true
+    threads: 32
+    requests-per-thread: 100
+
+  - name: phase-1
+    mode: closed-loop
+    threads: 200
+    requests-per-thread: 160
+
+  - name: phase-2
+    mode: closed-loop
+    threads: 200
+    requests-per-thread: 840
