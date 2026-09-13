@@ -43,6 +43,7 @@
 
     <!-- Runtime libraries not managed by spring-boot-starter-parent -->
     <aws.sdk.v2.version>2.28.29</aws.sdk.v2.version>
+    <resilience4j.version>2.2.0</resilience4j.version>
     <spotless.version>2.43.0</spotless.version>
   </properties>
 
@@ -52,6 +53,13 @@
         <groupId>software.amazon.awssdk</groupId>
         <artifactId>bom</artifactId>
         <version>${aws.sdk.v2.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>io.github.resilience4j</groupId>
+        <artifactId>resilience4j-bom</artifactId>
+        <version>${resilience4j.version}</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>

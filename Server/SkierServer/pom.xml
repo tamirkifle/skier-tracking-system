@@ -50,6 +50,16 @@
       <artifactId>apache-client</artifactId>
     </dependency>
 
+    <!-- Resilience: circuit breaking around DynamoDB -->
+    <dependency>
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-spring-boot3</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-micrometer</artifactId>
+    </dependency>
+
     <!-- API documentation -->
     <dependency>
       <groupId>org.springdoc</groupId>
