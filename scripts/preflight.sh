@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 # Checks that this machine can do the work before the work starts: repository, toolchain, Docker as
 # Testcontainers sees it, the ports the local stack needs, and optional tooling.
-#
-# FAIL means stop and fix. SKIP means a capability is absent, so anything needing it cannot be
-# verified here. Exit 0 means every required check passed.
 
 set -uo pipefail
 

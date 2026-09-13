@@ -5,7 +5,6 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
-# The freshness meters are bound on the consumer, not the server; step 7 reads this one.
 CONSUMER_URL="${CONSUMER_URL:-http://localhost:8085}"
 RESORT="${RESORT:-5}"
 SEASON="${SEASON:-2025}"
