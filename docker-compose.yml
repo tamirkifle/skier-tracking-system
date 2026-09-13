@@ -1,0 +1,79 @@
+# The whole system, locally, from nothing: `make up`.
+#
+# Everything below is real infrastructure rather than a stub. RabbitMQ is RabbitMQ, Redis is Redis,
+# and DynamoDB is DynamoDB's own API surface via LocalStack. The schema is applied by the same tool
+# a deployment would run, so a local stack and a real one cannot disagree about the tables.
+
+name: skiers
+
+services:
+  # --- Infrastructure -----------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: skiers-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # management UI: guest/guest
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      # `check_running` alone reports healthy before the node accepts connections.
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks: [skiers]
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: skiers-redis
+    ports:
+      - "6379:6379"
+    # A cache with no memory bound is a slow OOM. allkeys-lru is correct here because every key
+    # is a recomputable read-path entry, so eviction costs a DynamoDB query and nothing more.
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    networks: [skiers]
+
+  localstack:
+    image: localstack/localstack:3.8
+    container_name: skiers-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: dynamodb
+      DEBUG: "0"
+    volumes:
+      # State is intentionally ephemeral: `PERSISTENCE` is a LocalStack Pro feature, so the community
+      # image would silently ignore it. Table data is recreated by the schema service on every `up`,
+      # which is the property that makes a local run reproducible anyway.
+      - localstack-data:/var/lib/localstack
+    healthcheck:
+      # LocalStack reports a service as "available" until it is first used and "running" afterwards,
+      # so matching only "available" makes the container flip to unhealthy the moment the system
+      # actually works, and then every `docker compose up` after the first one fails on a healthy
+      # dependency. Both states mean usable.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:4566/_localstack/health | grep -Eq '\"dynamodb\": \"(available|running)\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks: [skiers]
+
+networks:
+  skiers:
+    driver: bridge
+
+volumes:
+  localstack-data:
