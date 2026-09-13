@@ -45,6 +45,7 @@
     <!-- Runtime libraries not managed by spring-boot-starter-parent -->
     <aws.sdk.v2.version>2.28.29</aws.sdk.v2.version>
     <resilience4j.version>2.2.0</resilience4j.version>
+    <hdrhistogram.version>2.2.2</hdrhistogram.version>
     <spotless.version>2.43.0</spotless.version>
   </properties>
 
@@ -63,6 +64,11 @@
         <version>${resilience4j.version}</version>
         <type>pom</type>
         <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.hdrhistogram</groupId>
+        <artifactId>HdrHistogram</artifactId>
+        <version>${hdrhistogram.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

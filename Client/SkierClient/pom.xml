@@ -32,6 +32,11 @@
       <artifactId>jackson-dataformat-yaml</artifactId>
     </dependency>
 
+    <dependency>
+      <groupId>org.hdrhistogram</groupId>
+      <artifactId>HdrHistogram</artifactId>
+    </dependency>
+
     <!-- Logging -->
     <dependency>
       <groupId>ch.qos.logback</groupId>
