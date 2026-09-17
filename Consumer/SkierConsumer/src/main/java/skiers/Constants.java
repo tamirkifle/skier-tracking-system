@@ -22,17 +22,15 @@ public final class Constants {
   public static final String SKIER_TRACKING_TABLE = "SkierTracking";
 
   public static final String ATTR_SKIER_ID = "skierID";
-  public static final String ATTR_SORT_KEY = "resortID#seasonID#dayID#timestamp";
+  public static final String ATTR_SORT_KEY = "resortID#seasonID#dayID#minute#liftID";
   public static final String ATTR_SKIER_SEASON = "skierID#seasonID";
   public static final String ATTR_RESORT_DAY = "resortID#dayID";
   public static final String ATTR_RESORT_SKIER = "resortID#skierID";
   public static final String ATTR_SEASON_DAY = "seasonID#dayID";
   public static final String ATTR_RESORT_SEASON_DAY = "resortSeasonDay";
   public static final String ATTR_RESORT_ID = "resortID";
-  public static final String ATTR_SEASON_ID = "seasonID";
   public static final String ATTR_DAY_ID = "dayID";
   public static final String ATTR_LIFT_ID = "liftID";
-  public static final String ATTR_TIMESTAMP = "timestamp";
   public static final String ATTR_VERTICAL = "vertical";
   public static final String ATTR_SKIER_KEY = "skierKey";
   public static final String ATTR_UNIQUE_SKIER_COUNT = "uniqueSkierCount";

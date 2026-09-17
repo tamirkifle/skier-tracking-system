@@ -52,7 +52,7 @@ public final class Constants {
   public static final String CS_INDEX = "CS-Index";
 
   public static final String ATTR_SKIER_ID = "skierID";
-  public static final String ATTR_SORT_KEY = "resortID#seasonID#dayID#timestamp";
+  public static final String ATTR_SORT_KEY = "resortID#seasonID#dayID#minute#liftID";
   public static final String ATTR_RESORT_SKIER = "resortID#skierID";
   public static final String ATTR_SEASON_DAY = "seasonID#dayID";
   public static final String ATTR_RESORT_SEASON_DAY = "resortSeasonDay";

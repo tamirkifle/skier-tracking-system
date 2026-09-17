@@ -29,7 +29,7 @@ public final class DynamoDbSchema {
   public static final String CS_INDEX = "CS-Index";
 
   public static final String SKIER_ID = "skierID";
-  public static final String SORT_KEY = "resortID#seasonID#dayID#timestamp";
+  public static final String SORT_KEY = "resortID#seasonID#dayID#minute#liftID";
   public static final String SKIER_SEASON = "skierID#seasonID";
   public static final String DAY_ID = "dayID";
   public static final String RESORT_DAY = "resortID#dayID";

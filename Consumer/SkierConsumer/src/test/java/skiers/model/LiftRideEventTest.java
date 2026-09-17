@@ -27,7 +27,7 @@ class LiftRideEventTest {
   void composesEveryIndexKey() {
     LiftRideEvent event = event("42", "5", "2025", "1", 21, 217);
 
-    assertThat(event.sortKey()).isEqualTo("5#2025#1#217");
+    assertThat(event.sortKey()).isEqualTo("5#2025#1#217#21");
     assertThat(event.skierSeasonKey()).isEqualTo("42#2025");
     assertThat(event.resortDayKey()).isEqualTo("5#1");
     assertThat(event.resortSkierKey()).isEqualTo("5#42");
@@ -37,13 +37,22 @@ class LiftRideEventTest {
   }
 
   @Test
-  @DisplayName("the sort key keys on minute-of-day, so same-minute rides collide")
-  void sameMinuteRidesShareAPrimaryKey() {
+  @DisplayName("the sort key ends in the lift, so same-minute rides no longer collide")
+  void sameMinuteRidesOnDifferentLiftsGetDistinctKeys() {
     LiftRideEvent first = event("42", "5", "2025", "1", 21, 100);
     LiftRideEvent second = event("42", "5", "2025", "1", 7, 100);
 
-    assertThat(first.sortKey()).isEqualTo(second.sortKey());
+    assertThat(first.sortKey()).isNotEqualTo(second.sortKey());
     assertThat(first.vertical()).isNotEqualTo(second.vertical());
+  }
+
+  @Test
+  @DisplayName("two deliveries of one ride share a sort key, which is what makes a redelivery safe")
+  void redeliveriesOfOneRideShareASortKey() {
+    LiftRideEvent first = event("42", "5", "2025", "1", 21, 100);
+    LiftRideEvent redelivered = event("42", "5", "2025", "1", 21, 100);
+
+    assertThat(first.sortKey()).isEqualTo(redelivered.sortKey());
   }
 
   @Test

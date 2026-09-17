@@ -1,0 +1,34 @@
+{
+  "dynamodb": {
+    "mode": "dynamodb",
+    "run_position": 2,
+    "items_written": 13368,
+    "dynamodb_write_requests": 543,
+    "cardinality_write_requests": 13368,
+    "items_per_request": 24.62,
+    "publish_seconds": 59.7,
+    "total_seconds_to_drained": 274.8,
+    "write_throughput_items_per_second": 48.6,
+    "first_sightings": 12019,
+    "duplicates_suppressed": 1349,
+    "first_sighting_share": 0.8991,
+    "cardinality_ops": 13368,
+    "cardinality_requests_per_event": 1.0
+  },
+  "redis-hll": {
+    "mode": "redis-hll",
+    "run_position": 1,
+    "items_written": 13371,
+    "dynamodb_write_requests": 539,
+    "cardinality_write_requests": 9634,
+    "items_per_request": 24.81,
+    "publish_seconds": 31.5,
+    "total_seconds_to_drained": 291.3,
+    "write_throughput_items_per_second": 45.9,
+    "first_sightings": 9634,
+    "duplicates_suppressed": 3736,
+    "first_sighting_share": 0.7205,
+    "cardinality_ops": 13370,
+    "cardinality_requests_per_event": 0.721
+  }
+}

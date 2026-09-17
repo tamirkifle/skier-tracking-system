@@ -21,16 +21,17 @@ needing its own delivery guarantees, so the problem recurses rather than termina
 
 Idempotent effects give the same observable outcome for far less.
 
-- **Ride writes** are keyed `(skierID, resort#season#day#minute)`, so a duplicate is an overwrite.
+- **Ride writes** are keyed `(skierID, resort#season#day#minute#lift)`, so a duplicate is an
+  overwrite.
 - **Cardinality updates** are gated by a conditional sentinel inside a transaction, so exactly one
   increment happens per skier-day regardless of how many deliveries occur.
 
 What this does not cover:
 
-- **Two rides in the same minute on different lifts collide**, and the second overwrites the first.
-  The property that makes redelivery safe is the same property that loses that event.
-- **A client retry after a timeout** can produce a genuinely new event with a new minute value, which
-  is indistinguishable from a real second ride unless the client reuses `x-event-id`.
+- **A client retry after a timeout** can produce a genuinely new event, and nothing on the server
+  can tell it apart from a real second ride unless the client reuses `x-event-id`. This is the one
+  uncovered case left: ADR-0009 closed the same-minute collision by putting the lift in the sort
+  key, but a retry that changes any coordinate is a new item by construction.
 - The producer stamps `x-event-id` and the consumer reads it, but nothing keys on it. It exists so
   that a future dedup store, or log correlation, has an identity to use.
 

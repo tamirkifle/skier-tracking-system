@@ -42,8 +42,9 @@ info "=============================================================="
 reset_datastores
 assert_clean_state recovery
 
-# One skier and one distinct minute per event, so no two collide on the primary key and stored == N
-# is a real statement. Admission control stays on, which is why 429s are counted separately.
+# One skier and one distinct minute per event. The lift in the sort key already keeps these
+# distinct, so the minute no longer has to; it stays that way so this run remains comparable with
+# the ones already recorded. Admission control stays on, which is why 429s are counted separately.
 
 info ""
 info "phase 1: publishing $EVENTS events with ids this script chose (consumer stopped)"
@@ -164,7 +165,7 @@ info "phase 4: reconciling $expected manifest entries against DynamoDB"
 # Projected to the two key attributes, which is all the reconciliation reads.
 ddb scan --table-name LiftRides \
   --projection-expression '#s,#k' \
-  --expression-attribute-names '{"#s":"skierID","#k":"resortID#seasonID#dayID#timestamp"}' \
+  --expression-attribute-names '{"#s":"skierID","#k":"resortID#seasonID#dayID#minute#liftID"}' \
   --output json > "$OUT/lift-rides.json"
 
 dlq_depth=$(queue_depth_of deadLetterQueue || echo 0)
@@ -178,16 +179,16 @@ stored_keys = set()
 with open(rides_path) as f:
     for item in json.load(f).get("Items", []):
         skier = item["skierID"]["S"]
-        sort = item["resortID#seasonID#dayID#timestamp"]["S"]
+        sort = item["resortID#seasonID#dayID#minute#liftID"]["S"]
         stored_keys.add((skier, sort))
 
 expected, missing = [], []
 with open(manifest_path) as f:
     for line in f:
         event_id, skier, lift, minute = line.rstrip("\n").split("\t")
-        # The item's identity is (skierID, resort#season#day#minute) and the event id is not
-        # persisted, so reconciliation is by coordinates the manifest made unique.
-        key = (skier, f"5#2025#1#{minute}")
+        # The item's identity is (skierID, resort#season#day#minute#lift) and the event id is
+        # not persisted, so reconciliation is by coordinates the manifest already records.
+        key = (skier, f"5#2025#1#{minute}#{lift}")
         expected.append(key)
         if key not in stored_keys:
             missing.append({"eventId": event_id, "skier": skier, "minute": minute})
@@ -204,7 +205,7 @@ with open(out_path, "w") as f:
 # The archived form of what was in the table, sorted, so the comparison can be re-run offline.
 keys_path = out_path.replace("reconciliation.json", "stored-keys.tsv")
 with open(keys_path, "w") as f:
-    f.write("skierID\tresortID#seasonID#dayID#timestamp\n")
+    f.write("skierID\tresortID#seasonID#dayID#minute#liftID\n")
     for skier, sort in sorted(stored_keys):
         f.write(f"{skier}\t{sort}\n")
 

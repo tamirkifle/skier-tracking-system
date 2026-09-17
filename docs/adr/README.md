@@ -12,3 +12,4 @@ One file per decision that was not obvious, dated, with the alternatives that we
 | [0006](0006-cardinality-strategy.md) | Keep exact cardinality as the default, and make it one transaction | Accepted |
 | [0007](0007-no-exactly-once.md) | Do not attempt exactly-once delivery | Accepted |
 | [0008](0008-confirmed-acceptance.md) | Answer the ingest POST on the publisher confirm | Accepted |
+| [0009](0009-lift-in-the-ride-sort-key.md) | Put the lift in the ride sort key | Accepted |

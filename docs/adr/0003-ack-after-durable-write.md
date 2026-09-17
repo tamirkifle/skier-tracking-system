@@ -21,8 +21,8 @@ and nack without requeue once the retry budget is spent.
 Delivery is at-least-once. The broker holds each message until it is durable and redelivers otherwise.
 
 Duplicates become normal, which is the cost. They are absorbed structurally rather than by a dedup
-store: the primary key `(skier, resort, season, day, minute)` makes a repeated write an overwrite, and
-the conditional sentinel makes a repeated cardinality update a no-op.
+store: the primary key `(skier, resort, season, day, minute, lift)` makes a repeated write an
+overwrite, and the conditional sentinel makes a repeated cardinality update a no-op.
 
 Settlement now happens on a different thread from the one that received the delivery, and RabbitMQ's
 `Channel` is not thread-safe. Every frame is emitted under a lock on the channel instance, and

@@ -11,12 +11,12 @@ Prometheus, Grafana
 ## Key Engineering Outcomes
 
 * **96% reduction in database calls.** Dynamic micro-batching of up to 25 items per flush cut
-  DynamoDB write operations from 13,168 to 533, averaging 24.7 items per request.
-  [run](benchmarks/results/2026-07-31-ab-state-reset/)
+  DynamoDB write operations from 13,664 to 532, averaging 24.8 items per request.
+  [run](benchmarks/results/2026-09-16-ab-state-reset/)
 * **Zero event loss under crash faults.** At-least-once delivery validated by issuing `SIGKILL` to
   the consumer at four points during peak drain. 0 of 1,000 in-flight events lost in every case,
-  absorbing 47 to 183 redeliveries cleanly through idempotent key design.
-  [run](benchmarks/results/2026-09-07-consumer-kill-recovery/)
+  absorbing 41 to 135 redeliveries cleanly through idempotent key design.
+  [run](benchmarks/results/2026-09-16-consumer-kill-recovery/)
 * **Predictable load shedding.** Under a 3x load spike, from 2,000 to 6,000 req/s offered, accepted
   intake held stable at roughly 100 events/s with early HTTP 429 rejections, preventing a downstream
   cascade. [run](benchmarks/results/2026-07-31-localstack-sweep/)
@@ -51,10 +51,11 @@ GET   ──▶ [ Read API ] ──▶ [ Redis cache-aside ] ──── miss �
   all traffic at a single resort, so a resort key would have capped the whole write path there. The
   cost is that no resort-scoped question can be answered from the base table.
 * **Inherent idempotency via sort key design.** Composite sort keys are formatted
-  `resortID#seasonID#dayID#minute`, matching the minute resolution the ingest API accepts. A
-  duplicate delivery overwrites its own minute bucket, so no deduplication store is needed. The
-  deliberate bound is one retained ride per skier-minute
-  ([ADR-0007](docs/adr/0007-no-exactly-once.md)).
+  `resortID#seasonID#dayID#minute#liftID`, and every component of that comes out of the message
+  body. A redelivered message rebuilds the same key and overwrites itself, so no deduplication store
+  is needed. The lift is in the key for the reason a server-stamped timestamp or a request id could
+  not be: it is identical on every delivery of one event and different for two different rides
+  ([ADR-0009](docs/adr/0009-lift-in-the-ride-sort-key.md)).
 * **Dynamic admission control.** Rather than a static limit, API nodes read RabbitMQ queue depth
   every 200 ms and set a local token bucket rate from it: halve above a depth of 200, step down
   linearly above 150, probe for headroom below 100. Halving stays per replica, since N instances

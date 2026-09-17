@@ -29,9 +29,10 @@ Two API behaviours have to be handled explicitly, and both are easy to get wrong
   `UnprocessedItems` map when individual items throttle. Code that only watches for thrown exceptions
   drops those items silently. They are mapped back to their originating events and returned for retry.
 - **Duplicate keys in one request fail the whole request.** Two items with the same primary key
-  produce a `ValidationException` for the entire batch. The sort key is `resort#season#day#minute`, so
-  a skier riding twice in the same minute is exactly that collision: rare, and guaranteed at 200,000
-  events. Colliding events are deferred to a later batch rather than allowed to poison the current one.
+  produce a `ValidationException` for the entire batch. Since ADR-0009 the sort key ends in the lift,
+  so what collides is a redelivered copy of one event rather than two different rides: rare per
+  event, and guaranteed somewhere across 200,000. Colliding events are deferred to a later batch
+  rather than allowed to poison the current one.
 
 Keeping both writers is what makes the comparison a measurement rather than an assertion. Same jar,
 same table, same seeded workload, one variable.

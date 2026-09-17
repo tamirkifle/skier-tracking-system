@@ -227,7 +227,7 @@ abstract class PipelineIntegrationTestBase {
 
     Map<String, AttributeValue> item = dynamoDb.query(ridesBySkier()).items().get(0);
 
-    assertThat(item.get(Constants.ATTR_SORT_KEY).s()).isEqualTo("5#2025#1#217");
+    assertThat(item.get(Constants.ATTR_SORT_KEY).s()).isEqualTo("5#2025#1#217#21");
     assertThat(item.get(Constants.ATTR_VERTICAL).s()).isEqualTo("210");
     assertThat(item.get(Constants.ATTR_SKIER_SEASON).s()).isEqualTo(skierId + "#2025");
     assertThat(item.get(Constants.ATTR_RESORT_DAY).s()).isEqualTo("5#1");

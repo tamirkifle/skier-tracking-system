@@ -9,8 +9,8 @@ Every read is scoped to a resort, a day, or both. The intuitive partition key is
 
 ## Decision
 
-`PK = skierID`, `SK = resortID#seasonID#dayID#timestamp`. Resort-scoped access goes through global
-secondary indexes.
+`PK = skierID`, `SK = resortID#seasonID#dayID#minute#liftID` (ADR-0009). Resort-scoped access goes
+through global secondary indexes.
 
 ## Consequences
 

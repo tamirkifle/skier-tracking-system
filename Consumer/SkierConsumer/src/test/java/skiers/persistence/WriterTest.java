@@ -147,28 +147,28 @@ class WriterTest {
     }
 
     @Test
-    @DisplayName(
-        "duplicate primary keys within a group are deferred, not allowed to fail the request")
-    void defersDuplicateKeysWithinAGroup() throws Exception {
+    @DisplayName("two lifts in the same minute are two items in one request, not a collision")
+    void writesEveryLiftRiddenInAMinute() throws Exception {
       respondWith(BatchWriteItemResponse.builder().build());
       BatchingLiftRideWriter writer = new BatchingLiftRideWriter(client, 25);
 
-      // These two collide on the sort key, and DynamoDB rejects a request containing both.
+      // The regression the lift in the sort key exists for. These two once shared a primary key,
+      // so the second was deferred to a later request and then overwrote the first.
       LiftRideEvent first = event("42", 21, 100);
-      LiftRideEvent colliding = event("42", 7, 100);
-      assertThat(first.sortKey()).isEqualTo(colliding.sortKey());
+      LiftRideEvent sameMinute = event("42", 7, 100);
+      assertThat(first.sortKey()).isNotEqualTo(sameMinute.sortKey());
 
-      List<LiftRideEvent> deferred = writer.write(List.of(first, colliding));
+      List<LiftRideEvent> deferred = writer.write(List.of(first, sameMinute));
 
-      assertThat(deferred).containsExactly(colliding);
+      assertThat(deferred).isEmpty();
       ArgumentCaptor<BatchWriteItemRequest> captor =
           ArgumentCaptor.forClass(BatchWriteItemRequest.class);
       verify(client).batchWriteItem(captor.capture());
-      assertThat(captor.getValue().requestItems().get(Constants.LIFT_RIDES_TABLE)).hasSize(1);
+      assertThat(captor.getValue().requestItems().get(Constants.LIFT_RIDES_TABLE)).hasSize(2);
     }
 
     @Test
-    @DisplayName("N copies of one event write one item and defer the rest")
+    @DisplayName("N redeliveries of one event write one item and defer the rest")
     void deduplicatesRepeatedDeliveries() throws Exception {
       respondWith(BatchWriteItemResponse.builder().build());
       BatchingLiftRideWriter writer = new BatchingLiftRideWriter(client, 25);
@@ -213,10 +213,8 @@ class WriterTest {
               Constants.ATTR_SKIER_ID,
               Constants.ATTR_SORT_KEY,
               Constants.ATTR_RESORT_ID,
-              Constants.ATTR_SEASON_ID,
               Constants.ATTR_DAY_ID,
               Constants.ATTR_LIFT_ID,
-              Constants.ATTR_TIMESTAMP,
               Constants.ATTR_VERTICAL,
               Constants.ATTR_SKIER_SEASON,
               Constants.ATTR_RESORT_DAY,
@@ -224,7 +222,7 @@ class WriterTest {
               Constants.ATTR_SEASON_DAY,
               Constants.ATTR_RESORT_SEASON_DAY);
       assertThat(attributes.get(Constants.ATTR_VERTICAL).s()).isEqualTo("210");
-      assertThat(attributes.get(Constants.ATTR_SORT_KEY).s()).isEqualTo("5#2025#1#217");
+      assertThat(attributes.get(Constants.ATTR_SORT_KEY).s()).isEqualTo("5#2025#1#217#21");
     }
   }
 }

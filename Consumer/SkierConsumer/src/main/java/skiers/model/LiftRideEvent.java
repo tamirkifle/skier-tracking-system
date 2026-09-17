@@ -116,9 +116,9 @@ public final class LiftRideEvent {
     return liftId * Constants.VERTICAL_FEET_PER_LIFT;
   }
 
-  /** Resort, season, day and minute, so two rides in one minute collide and the later wins. */
+  /** Every coordinate of the ride, so a redelivery overwrites and a different lift does not. */
   public String sortKey() {
-    return resortId + '#' + seasonId + '#' + dayId + '#' + time;
+    return resortId + '#' + seasonId + '#' + dayId + '#' + time + '#' + liftId;
   }
 
   public String skierSeasonKey() {
